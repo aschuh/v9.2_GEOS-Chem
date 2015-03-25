@@ -230,16 +230,19 @@ CONTAINS
 !\\
 ! !INTERFACE:
 !
-  SUBROUTINE GIGC_Init_All( am_I_Root, Input_Opt, State_Chm, State_Met, RC )
+  SUBROUTINE GIGC_Init_All( am_I_Root, Input_Opt, State_Chm, State_Met, &
+                       CT_Input_1,CT_Input_2,CT_Input_3,CT_Output_1,    &
+                       CT_Output_2, CT_Output_3,RC )
 !
 ! !USES:
 !
-    USE CMN_Size_Mod,       ONLY : IIPAR, JJPAR, LLPAR, NBIOMAX
+    USE CMN_Size_Mod,       ONLY : IIPAR, JJPAR, LLPAR, NBIOMAX, MAXNOBS
     USE Comode_Loop_Mod,    ONLY : IGAS
     USE GIGC_ErrCode_Mod
     USE GIGC_Input_Opt_Mod
     USE GIGC_State_Chm_Mod
     USE GIGC_State_Met_Mod
+    USE GIGC_In_Carbontracker_Mod
 !
 ! !INPUT PARAMETERS:
 !
@@ -250,6 +253,8 @@ CONTAINS
 !
     TYPE(MetState), INTENT(INOUT) :: State_Met   ! Meteorology State object
     TYPE(ChmState), INTENT(INOUT) :: State_Chm   ! Chemistry State object
+    TYPE(Carbontracker_In), INTENT(INOUT)  :: CT_Input_1,CT_Input_2,CT_Input_3   ! CT input objects
+    TYPE(Carbontracker_Out), INTENT(INOUT) :: CT_Output_1,CT_Output_2,CT_Output_3   ! CT input objects
 !
 ! !OUTPUT PARAMETERS:
 !
@@ -371,7 +376,48 @@ CONTAINS
     ! Return upon error
     IF ( RC /= GIGC_SUCCESS ) RETURN
 
+    !=======================================================================
+    ! Initialize objects for input/output
+    !=======================================================================
+
+    CALL Init_Carbontracker_In( am_I_Root = am_I_Root,     &
+                                 NOBS = MAXNOBS,           &
+                              In_Carbontracker=CT_Input_1, &
+                              RC = RC)
+
+    CALL Init_Carbontracker_In( am_I_Root = am_I_Root,     & 
+                                 NOBS = MAXNOBS,           &
+                              In_Carbontracker=CT_Input_2, &
+                              RC = RC)
+
+    CALL Init_Carbontracker_In( am_I_Root = am_I_Root,     &
+                                 NOBS = MAXNOBS,           &
+                              In_Carbontracker=CT_Input_3, &
+                              RC = RC)
+
+    CALL Init_Carbontracker_Out( am_I_Root = am_I_Root,     &
+                                 NOBS = MAXNOBS,            &
+                                 NTRACERS = 6,              &
+                              Out_Carbontracker=CT_Output_1,&
+                              RC = RC)
+
+    CALL Init_Carbontracker_Out( am_I_Root = am_I_Root,     &
+                                 NOBS = MAXNOBS ,           &
+                                 NTRACERS = 6,              &
+                              Out_Carbontracker=CT_Output_2,&
+                              RC = RC)
+
+    CALL Init_Carbontracker_Out( am_I_Root = am_I_Root,     &
+                                 NOBS = MAXNOBS ,           &
+                                 NTRACERS = 6,              &
+                              Out_Carbontracker=CT_Output_3,&
+                              RC = RC)
+
+    ! Return upon error
+    IF ( RC /= GIGC_SUCCESS ) RETURN
+
   END SUBROUTINE GIGC_Init_All
+
 !EOC
 !------------------------------------------------------------------------------
 !          Harvard University Atmospheric Chemistry Modeling Group            !

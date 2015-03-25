@@ -288,8 +288,9 @@
       HH     = FDAY * 24d0 
       MM     = ( HH - INT( HH ) ) * 60d0
       SS     = ( MM - INT( MM ) ) * 60d0   
+
       HHMMSS = ( INT( HH ) * 10000 ) + ( INT( MM ) * 100 ) + INT( SS )
-      
+
       END SUBROUTINE CALDATE
 !EOC
       END MODULE JULDAY_MOD

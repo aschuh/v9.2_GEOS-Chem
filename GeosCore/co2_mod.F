@@ -249,6 +249,7 @@
 
       ! For values from Input_Opt
       LOGICAL                :: LGENFLX
+      LOGICAL                :: LCTFLUX
       LOGICAL                :: LSIBBIOHOURLY
       LOGICAL                :: LDOCNMON
       LOGICAL                :: LODAFF
@@ -291,6 +292,7 @@
 
       ! Copy values from Input_Opt
       LGENFLX     = Input_Opt%LGENFLX
+      LCTFLUX       = Input_Opt%LCTFLUX
       LSIBBIOHOURLY = Input_Opt%LSIBBIOHOURLY
       LDOCNMON      = Input_Opt%LDOCNMON
       LODAFF        = Input_Opt%LODAFF
@@ -404,6 +406,19 @@
       ENDIF
 
       !----------------------------------------------------------------
+      ! Read in 3-hourly CT Component Fluxes 
+      !----------------------------------------------------------------
+      IF ( LCTFLUX ) THEN
+
+         write(*,*) '*** USING CarbonTracker Exchange ***'
+
+         ! ... then use 3-hourly NEP emissions for Bal Bio ...
+         IF ( MOD( HOUR, 3 ) == 0 ) THEN
+            CALL READ_CT_3HR_FLUX( MONTH, DAY, HOUR )
+         ENDIF
+      ENDIF
+
+      !----------------------------------------------------------------
       ! Read in 3-hourly or daily balanced biosphere data
       !----------------------------------------------------------------
       IF ( LBIODIURNAL ) THEN
@@ -491,7 +506,8 @@
          ! #1: Total CO2
          ! #2: CO2 from fossil fuel emissions 
          !-------------------------------------------
-         IF ( LGENFF .or. LANNFF .or. LMONFF .or. LODAFF) THEN
+         IF ( LGENFF .or. LANNFF .or. LMONFF .or. LODAFF .or.
+     &            LCTFLUX) THEN
 
             ! Fossil fuel emissions of CO2 [molec/cm2/s]
             E_CO2          = EMFOSSCO2(I,J)
@@ -506,7 +522,7 @@
 
             ! Add to Tracer #1: Total CO2 [kg]
             STT(I,J,1,1)   = STT(I,J,1,1) + E_CO2
-
+            
 	     ! Add to Tracer #2: Fossil CO2 [kg]
             IF ( N_TRACERS > 1 ) THEN
                STT(I,J,1,2)   = STT(I,J,1,2) + E_CO2
@@ -536,7 +552,7 @@
          ! #3: CO2 from ocean exchange
          !-------------------------------------------
          IF ( LOCN1997 .or. LOCN2009ANN .or. LOCN2009MON .or.
-     &              LDOCNMON) THEN
+     &              LDOCNMON .or. LCTFLUX ) THEN
             ! Ocean CO2 emissions in [molec/cm2/s]
             E_CO2          = EMOCCO2(I,J)
 
@@ -567,7 +583,7 @@
          ! #4: CO2 from balanced biosphere emissions
          !-------------------------------------------
          IF ( LBIODAILY .OR. LBIODIURNAL .OR. LSIBBIOHOURLY .OR. 
-     &         LGENFLX ) THEN
+     &         LGENFLX .OR. LCTFLUX ) THEN
 
             ! Balanced biosphere CO2 [molec/cm2/s]
             E_CO2         = EMBIOCO2(I,J)
@@ -599,11 +615,11 @@
          ! #5: CO2 from biomass burning emissions
          !-------------------------------------------
          IF ( LSEASBB .OR. LGFED2BB .OR. L8DAYBB .OR.
-     &        LGFED3BB) THEN 
+     &        LGFED3BB .OR. LCTFLUX ) THEN 
 
             ! Biomass burning emissions [molec/cm2/s]
-            E_CO2          = BIOMASS(I,J,IDBCO2)
-            !E_CO2          = EMBIOBRNCO2(I,J) 
+            !E_CO2          = BIOMASS(I,J,IDBCO2)
+            E_CO2          = EMBIOBRNCO2(I,J) 
             !This was from older versions, see note above
 
             ! ND04 diag: Biomass burning CO2 [molec/cm2/s]
@@ -3194,9 +3210,9 @@
       ! positive = into atm; negative = into biosphere
       !Note: I'm not a big FORTRAN FAN HOUR/3=FLOOR(HOUR/3) by default
       !-----------------------------------------------------------------
-      PRINT *,'DAY:',DAY
-      PRINT *,'HOUR:',HOUR
-      PRINT *,'time:',(DAY-1)*8+HOUR/3+1
+      !PRINT *,'DAY:',DAY
+      !PRINT *,'HOUR:',HOUR
+      !PRINT *,'time:',(DAY-1)*8+HOUR/3+1
 !     CALL readVar2D(TRIM(RESP_FILENAME),'hour_flux',IIPAR,
 !    &                  JJPAR, (DAY-1)*24+HOUR+1,RARRAY(:,:,1))
 
@@ -3246,6 +3262,366 @@
 
       END SUBROUTINE READ_KAWA_GENERIC_3HR_FLUX
 !EOC
+!------------------------------------------------------------------------------
+!                        Colorado State University and                        !
+!                        University of Toronto and                            !
+!          Harvard University Atmospheric Chemistry Modeling Group            !
+!------------------------------------------------------------------------------
+!BOP
+!
+! !IROUTINE: read_ct_3hr_flux
+!
+! !DESCRIPTION: Subroutine READ\_KAWA\_GENERIC\_3HR\_FLUX reads a file
+! of combined fluxes which include biosphere fluxes from CASA-GFED2
+! (monthly fluxes modulated to 3-hr using MERRA output in the method
+! of Olsen and Randerson), Global fossil fuel CO2 emmisions from CDIAC/ORNL
+! NDP 058 v2011, monthly ocean flux from Takahashi, et al. (2009).
+!\\
+!\\
+! !INTERFACE:
+!
+      SUBROUTINE READ_CT_3HR_FLUX( MONTH, DAY, HOUR )
+!
+! !USES:
+!
+      USE NCCOOARDSFORMAT,  ONLY : readVar2D, readensVar2D
+      USE DIRECTORY_MOD,    ONLY : CT_FLUX_DIR
+      USE TRANSFER_MOD,     ONLY : TRANSFER_2D
+      USE TIME_MOD,         ONLY : GET_YEAR, ITS_A_LEAPYEAR, GET_NYMDb
+      USE TIME_MOD,         ONLY : GET_ELAPSED_MIN, YMD_EXTRACT
+      USE ENKF_MOD,         ONLY : LLAG, LBIAS, BIASFILE, ENUMBER
+      USE ENKF_MOD,         ONLY : CYCLE_LEN, LAG_NUM, BIASFILEIN, RERUN
+      USE REGRID_1x1_MOD,   ONLY : DO_REGRID_G2G_1x1, DO_REGRID_1x1
+      USE CMN_SIZE_MOD      ! Size parameters
+      USE CT_INPUT_READ_MOD, ONLY : READ_SCALING_NC
+!
+! !INPUT PARAMETERS:
+!
+      INTEGER, INTENT(IN) :: MONTH   ! Current month (1-12)
+      INTEGER, INTENT(IN) :: DAY     ! Current day (1-31)
+      INTEGER, INTENT(IN) :: HOUR    ! Current hour (0-23)
+!
+! !REMARKS:
+!  References
+!  (1 ) Olsen and Randerson (2004), Differences between surface and column
+!        atmospheric CO2 and implications for carbon cycle research, J.
+!        Geophys. Res., 109, D02301,
+!
+! !REVISION HISTORY:
+!  29 Aug 2012 - R. McKeown   - Initial version
+!EOP
+!------------------------------------------------------------------------------
+!BOC
+!
+! !LOCAL VARIABLES:
+!
+      INTEGER                :: YEAR,YYYY,MM,DD,NYMDb,XDAY
+      INTEGER                :: LAG_NUM_NEW
+      INTEGER                :: I,J,STATUS
+!      REAL*4                 :: FLX_ARRAY(IIPAR,JJPAR,1)
+      REAL*4                 :: FLX_ARRAY(360,180,1)
+      REAL*4                 :: XREAL
+      CHARACTER(LEN=255)     :: FLUX_FILENAME
+      CHARACTER(LEN=255)     :: CURRENT_BIASFILE
+      CHARACTER(LEN=4)       :: CYEAR, YYYY_STR
+      CHARACTER(LEN=2)       :: CMONTH, MM_STR,DD_STR
+      REAL*8             :: GEN_1x1(360,180,1)
+      REAL*8             :: GEOS_1x1(I1x1,J1x1,1)
+      REAL*8             :: GEOS_GRID(IIPAR,JJPAR,1)
+      REAL*4               :: SCALING_FACTOR(360,180,1)
+
+      !=================================================================
+      ! IF LAT==TRUE THEN PULL SCALING FACTORS
+      !=================================================================
+
+      IF ( LLAG ) THEN
+          XREAL = GET_ELAPSED_MIN()/(1440*CYCLE_LEN)
+          print *,'MINS:',GET_ELAPSED_MIN()
+          XDAY =  FLOOR(XREAL)
+          print *,'XDAY:',XDAY
+          LAG_NUM_NEW = XDAY + 1
+          print *,'lagnumnew:',LAG_NUM_NEW
+      ENDIF
+
+        ! Extract today's time into HH, MM, and SS sections
+        ! (rename minutes to II so as not to overwrite MM)
+        NYMDb = GET_NYMDb()
+        CALL YMD_EXTRACT( NYMDb, YYYY, MM, DD )
+
+         print *,'NYMDb:',NYMDb
+         print *,'MM:',MM
+
+#if   defined( LINUX_PGI )
+
+        ! Use ENCODE statement for PGI/Linux (bmy, 9/29/03)
+        ENCODE( 4, '(i4.4)', YYYY_STR ) YYYY
+        ENCODE( 2, '(i2.2)', MM_STR   ) MM
+        ENCODE( 2, '(i2.2)', DD_STR   ) DD
+
+#else
+
+        ! For other platforms, use an F90 internal write (bmy, 9/29/03)
+        WRITE( YYYY_STR, '(i4.4)' ) YYYY
+        WRITE( MM_STR,   '(i2.2)' ) MM
+        WRITE( DD_STR,   '(i2.2)' ) DD
+#endif
+
+        CURRENT_BIASFILE = TRIM(BIASFILEIN)//YYYY_STR//'-'//MM_STR
+     &       //'-'//DD_STR//'.nc'
+
+      !-- IF RERUN THAN PULL LAG=1, otherwise use LAG_NUM_NEW
+        IF ( RERUN == 1 )  LAG_NUM_NEW = 1 
+
+       PRINT *,'READING SCALING FACTORS FROM:',CURRENT_BIASFILE
+
+       CALL READ_SCALING_NC( CURRENT_BIASFILE ,
+     &     LAG_NUM_NEW , SCALING_FACTOR)
+
+
+      !=================================================================
+      ! READ_CT_3HR_FLUX begins here!
+      !=================================================================
+
+      YEAR   = GET_YEAR()    ! dbj
+
+      ! Create string for day of year
+       WRITE( CYEAR, '(i4)' ) YEAR
+       WRITE( CMONTH, '(i2.2)' ) MONTH
+
+      FLUX_FILENAME = TRIM( CT_FLUX_DIR ) //
+      !&                'flux.e622.co2.3hrly.'   //
+      !&                'NewestNEE.3hrly.1x1.25.'  //
+      !&                'NEE.2x2.5.'       //
+     &                CYEAR // CMONTH // '.nc'
+
+      ! Echo file name to stdout
+      WRITE( 6, 100 ) TRIM( FLUX_FILENAME )
+ 100  FORMAT( '     - READ_CT_3HR_FLUX: Reading ', a )
+
+      !-----------------------------------------------------------------
+      ! Read Kawa e622 Flux [kg C/m2/s] from disk
+      ! The fluxes use atmospheric convention:
+      ! positive = into atm; negative = into biosphere
+      !Note: I'm not a big FORTRAN FAN HOUR/3=FLOOR(HOUR/3) by default
+      !-----------------------------------------------------------------
+      !PRINT *,'DAY:',DAY
+      !PRINT *,'HOUR:',HOUR
+      !PRINT *,'time:',(DAY-1)*8+HOUR/3+1
+!     CALL readVar2D(TRIM(RESP_FILENAME),'hour_flux',IIPAR,
+!    &                  JJPAR, (DAY-1)*24+HOUR+1,RARRAY(:,:,1))
+
+!     CALL readVar2D(TRIM(ASSIM_FILENAME),'hour_flux',IIPAR,
+!    &                  JJPAR, (DAY-1)*24+HOUR+1,AARRAY(:,:,1))
+
+      IF ( ( MONTH .EQ. 2 ) .AND. ( DAY .EQ. 29 ) ) THEN
+          CALL readVar2D(TRIM(FLUX_FILENAME),'bio_flux_opt',
+     &      360,180, (DAY-2)*8+HOUR/3+1,FLX_ARRAY(:,:,1))
+      ELSE
+          CALL readVar2D(TRIM(FLUX_FILENAME),'bio_flux_opt',
+     &      360,180, (DAY-1)*8+HOUR/3+1,FLX_ARRAY(:,:,1))
+      ENDIF
+      
+      IF(LLAG) THEN
+         print *,'scaling fluxes ....','using nlag:',LAG_NUM_NEW
+         FLX_ARRAY(:,:,1) = FLX_ARRAY(:,:,1) * SCALING_FACTOR(:,:,1)
+      ENDIF
+
+      ! Cast to REAL*8 before regridding
+      !DO I=1,360
+      !  DO J=1,180
+      !       GEN_1x1(I,J,1) = REAL(FLX_ARRAY(I,J,1),8)
+      !  END DO
+      !END DO
+
+      GEN_1x1(:,:,1) = FLX_ARRAY(:,:,1)
+
+      ! Regrid from GENERIC 1x1 --> GEOS 1x1
+      CALL DO_REGRID_G2G_1x1( 'molec/m2/s', GEN_1x1, GEOS_1x1 )
+
+      ! Regrid from GEOS 1x1 --> current model resolution
+      CALL DO_REGRID_1x1( 1, 'molec/m2/s', GEOS_1x1, GEOS_GRID)
+
+      
+
+      !CALL readVar2D(TRIM(FLUX_FILENAME), 'co2', IIPAR,
+      !&                  JJPAR, (DAY-1)*8+HOUR+1,FLX_ARRAY(:,:,1))
+
+      !-- Convert kgC m^-2 s^-1 to umolC m^-2 s^-1
+      !-- Then use conversion in SiB formula later to go to
+      !    molC cm^-2 s^-1
+      !-- Molecular weight of C is 12 g/mole
+      !-- Then convert molC to molecules C via Avos #
+      !-- 10.**3. * (1./12.) * 10.**-4. * 6.0221415*10.**23. = 5.018451e+21
+      !-- 12^-1*10^9*( 10.**-6.*10.**-4.*6.0221415*10.**23.)=5.018451e+21
+      !-- SIB conv factor (explained in SiB read code)= 6.022142e+13
+      !FLX_ARRAY = 5.018451e+21 * FLX_ARRAY
+      !FLX_ARRAY = 6.022142e+13 * FLX_ARRAY
+
+      !-- Convert molC m^-2 s^-1 to umolC m^-2 s^-1 to molecules C cm^-2 s^-1
+      !-- Then convert molC to molecules C via Avos #
+      !RARRAY = ( 10.**-4. * 6.0221415*10.**23. ) * RARRAY
+
+      !print *,'max flux:',MAXVAL(FLX_ARRAY)
+      !print *,'min flux:',MINVAL(FLX_ARRAY)
+
+      EMBIOCO2 = GEOS_GRID(:,:,1) * 6.022142e+19_8
+
+      !print *,'max flx_array flux:',MAXVAL(FLX_ARRAY)*6.02e+19_8
+      !print *,'max gen_1x1 flux:',MAXVAL(GEN_1x1)*6.02e+19_8
+      !print *,'max geos_grid flux:',MAXVAL(GEOS_GRID)*6.02e+19_8
+      !print *,'max embioco2 flux:',MAXVAL(EMBIOCO2)
+
+      !print *,'max flux',maxval(flx_array)
+      !print *,'min flux:',minval(flx_array)
+      
+      ! Cast from REAL*4 to REAL*8 and resize if necessary
+      ! The EMBIONETCO2 appears to be the most similar variable
+      !    store there.
+      !CALL TRANSFER_2D( GEOS_GRID(:,:,1), EMBIOCO2 )
+
+      !---------------------------
+      !-- Reading fossil fuels
+      !---------------------------
+
+      IF ( ( MONTH .EQ. 2 ) .AND. ( DAY .EQ. 29 ) ) THEN
+          CALL readVar2D(TRIM(FLUX_FILENAME),'fossil_flux_imp',
+     &      360,180, (DAY-2)*8+HOUR/3+1,FLX_ARRAY(:,:,1))
+      ELSE
+          CALL readVar2D(TRIM(FLUX_FILENAME),'fossil_flux_imp',
+     &      360,180, (DAY-1)*8+HOUR/3+1,FLX_ARRAY(:,:,1))
+      ENDIF
+
+      ! Cast to REAL*8 before regridding
+      !DO I=1,360
+      !  DO J=1,180
+      !       GEN_1x1(I,J,1) = REAL(FLX_ARRAY(I,J,1),8)
+      !  END DO
+      !END DO
+
+      GEN_1x1(:,:,1) = FLX_ARRAY(:,:,1)
+
+      !PRINT *,'GEN_1x1:',GEN_1x1(360,180,1)
+
+      !CALL TRANSFER_2D( FLX_ARRAY(:,:,1), GEN_1x1 )
+
+      ! Regrid from GENERIC 1x1 --> GEOS 1x1
+      CALL DO_REGRID_G2G_1x1( 'molec/m2/s', GEN_1x1, GEOS_1x1 )
+
+      ! Regrid from GEOS 1x1 --> current model resolution
+      CALL DO_REGRID_1x1( 1, 'molec/m2/s', GEOS_1x1, GEOS_GRID)
+
+      !print *,'max flux:',MAXVAL(FLX_ARRAY)
+      !print *,'min flux:',MINVAL(FLX_ARRAY)
+
+      EMFOSSCO2 = GEOS_GRID(:,:,1) * 6.022142e+19_8 
+
+      !print *,'max flx_array flux:',MAXVAL(FLX_ARRAY)*6.02e+19_8
+      !print *,'max gen_1x1 flux:',MAXVAL(GEN_1x1)*6.02e+19_8
+      !print *,'max geos_grid flux:',MAXVAL(GEOS_GRID)*6.02e+19_8
+      !print *,'max embioco2 flux:',MAXVAL(EMFOSSCO2)
+
+      !print *,'max flux:',MAXVAL(FLX_ARRAY)
+
+      !print *,'max flux',maxval(flx_array)
+      !print *,'min flux:',minval(flx_array)
+
+      ! Cast from REAL*4 to REAL*8 and resize if necessary
+      !CALL TRANSFER_2D( GEOS_GRID(:,:,1), EMFOSSCO2 )
+
+      !---------------------------
+      !-- Reading fire fuels
+      !---------------------------
+
+      IF ( ( MONTH .EQ. 2 ) .AND. ( DAY .EQ. 29 ) ) THEN
+          CALL readVar2D(TRIM(FLUX_FILENAME),'fire_flux_imp',
+     &      360,180, (DAY-2)*8+HOUR/3+1,FLX_ARRAY(:,:,1))
+      ELSE
+          CALL readVar2D(TRIM(FLUX_FILENAME),'fire_flux_imp',
+     &      360,180, (DAY-1)*8+HOUR/3+1,FLX_ARRAY(:,:,1))
+      ENDIF
+
+      ! Cast to REAL*8 before regridding
+      !DO I=1,360
+      !  DO J=1,180
+      !       GEN_1x1(I,J,1) = REAL(FLX_ARRAY(I,J,1),8)
+      !  END DO
+      !END DO
+
+      GEN_1x1(:,:,1) = FLX_ARRAY(:,:,1)
+
+      ! Regrid from GENERIC 1x1 --> GEOS 1x1
+      CALL DO_REGRID_G2G_1x1( 'molec/m2/s', GEN_1x1, GEOS_1x1 )
+
+      ! Regrid from GEOS 1x1 --> current model resolution
+      CALL DO_REGRID_1x1( 1, 'molec/m2/s', GEOS_1x1, GEOS_GRID)
+
+      !print *,'max flux:',MAXVAL(FLX_ARRAY)
+      !print *,'min flux:',MINVAL(FLX_ARRAY)
+
+      EMBIOBRNCO2 = GEOS_GRID(:,:,1) * 6.022142e+19
+
+      !print *,'max flx_array flux:',MAXVAL(FLX_ARRAY)*6.02e+19_8
+      !print *,'max gen_1x1 flux:',MAXVAL(GEN_1x1)*6.02e+19_8
+      !print *,'max geos_grid flux:',MAXVAL(GEOS_GRID)*6.02e+19_8
+      !print *,'max embioco2 flux:',MAXVAL(EMBIOBRNCO2)
+
+      !print *,'max flux:',MAXVAL(FLX_ARRAY)
+
+      !print *,'max flux',maxval(flx_array)
+      !print *,'min flux:',minval(flx_array)
+
+      ! Cast from REAL*4 to REAL*8 and resize if necessary
+      !CALL TRANSFER_2D( GEOS_GRID(:,:,1), EMBIOBRNCO2 )
+
+      !---------------------------
+      !-- Reading ocean fuels
+      !---------------------------
+
+      !IF ( ( MONTH .EQ. 2 ) .AND. ( DAY .EQ. 29 ) ) THEN
+      !    CALL readVar2D(TRIM(FLUX_FILENAME),'ocn_flux_opt',
+      !&      360,180, (DAY-2)*8+HOUR/3+1,FLX_ARRAY(:,:,1))
+      !ELSE
+      !    CALL readVar2D(TRIM(FLUX_FILENAME),'ocn_flux_opt',
+      !&      360,180, (DAY-1)*8+HOUR/3+1,FLX_ARRAY(:,:,1))
+      !ENDIF
+
+      GEN_1x1(:,:,1) = FLX_ARRAY(:,:,1)
+
+      ! Cast to REAL*8 before regridding
+      DO I=1,360
+        DO J=1,180
+             GEN_1x1(I,J,1) = REAL(FLX_ARRAY(I,J,1),8)
+        END DO
+      END DO
+
+      ! Regrid from GENERIC 1x1 --> GEOS 1x1
+      CALL DO_REGRID_G2G_1x1( 'molec/m2/s', GEN_1x1, GEOS_1x1 )
+
+      ! Regrid from GEOS 1x1 --> current model resolution
+      CALL DO_REGRID_1x1( 1, 'molec/m2/s', GEOS_1x1, GEOS_GRID)
+
+      !print *,'max flux:',MAXVAL(FLX_ARRAY)
+      !print *,'min flux:',MINVAL(FLX_ARRAY)
+
+      EMOCCO2 = GEOS_GRID(:,:,1) * 6.022142e+19
+
+      !print *,'max flx_array flux:',MAXVAL(FLX_ARRAY)*6.02e+19_8
+      !print *,'max gen_1x1 flux:',MAXVAL(GEN_1x1)*6.02e+19_8
+      !print *,'max geos_grid flux:',MAXVAL(GEOS_GRID)*6.02e+19_8
+      !print *,'max embioco2 flux:',MAXVAL(EMOCCO2)
+
+      !print *,'max flux:',MAXVAL(FLX_ARRAY)
+
+      !print *,'max flux',maxval(flx_array)
+      !print *,'min flux:',minval(flx_array)
+
+      ! Cast from REAL*4 to REAL*8 and resize if necessary
+      !CALL TRANSFER_2D( GEOS_GRID(:,:,1), EMOCCO2)
+
+      END SUBROUTINE READ_CT_3HR_FLUX
+!EOC
+
+
 !------------------------------------------------------------------------------
 !                        Colorado State University and                        !
 !                        University of Toronto and                            !
@@ -3398,11 +3774,11 @@
           write(CLAG_NUM, '(i3.3)') LAG_NUM_NEW
 
           IF ( RERUN ) THEN
-          CURRENT_BIASFILE = TRIM(BIASFILEIN)//'post_'//CLAG_NUM//'_'//
-     &         CCYCLE_NUM //'.nc'
+          !CURRENT_BIASFILE = TRIM(BIASFILEIN)//'post_'//CLAG_NUM//'_'//
+          !&         CCYCLE_NUM //'.nc'
           ELSE
-          CURRENT_BIASFILE = TRIM(BIASFILEIN)//'prior_'//CLAG_NUM//'_'//
-     &         CCYCLE_NUM//'.nc'
+          !CURRENT_BIASFILE = TRIM(BIASFILEIN)//'prior_'//CLAG_NUM//'_'//
+          !&         CCYCLE_NUM//'.nc'
           ENDIF
 
         ELSE

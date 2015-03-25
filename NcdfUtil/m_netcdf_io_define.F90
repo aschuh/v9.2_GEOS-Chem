@@ -15,6 +15,7 @@
 ! !PUBLIC MEMBER FUNCTIONS:
 !
       public  NcDef_dimension
+      public  NcDef_unlim_dimension
       public  NcDef_variable
       public  NcSetFill
       public  NcEnd_def
@@ -128,6 +129,61 @@ CONTAINS
 
       return
       end subroutine NcDef_dimension
+!EOC
+!-------------------------------------------------------------------------
+!BOP
+!
+! !IROUTINE: NcDef_unlim_dimension
+!
+! !INTERFACE:
+!
+      subroutine NcDef_unlim_dimension(ncid,name,id)
+!
+! !USES:
+!
+      use m_do_err_out
+!
+      implicit none
+!
+      include 'netcdf.inc'
+!
+! !INPUT PARAMETERS:
+!!    ncid  : netCDF file id
+!!    name  : dimension name
+!!    len   : dimension number
+      character (len=*), intent(in) :: name
+      integer,           intent(in) :: ncid
+!
+! !OUTPUT PARAMETERS:
+!!    id    : dimension id
+      integer,           intent(out) :: id
+!
+! !DESCRIPTION: Defines dimension.
+!\\
+!\\
+! !AUTHOR:
+!  Jules Kouatchou and Maharaj Bhat
+!
+! !REVISION HISTORY:
+!  Initial code.
+!
+!EOP
+!-------------------------------------------------------------------------
+!BOC
+!
+! !LOCAL VARIABLES:
+      character (len=128) :: err_msg
+      integer :: ierr
+!
+      ierr = Nf_Def_Dim (ncid, name, NF_UNLIMITED, id)
+
+      if (ierr.ne.NF_NOERR) then
+         err_msg = 'Nf_Def_Dim: can not define dimension : '// Trim (name)
+         call Do_Err_Out (err_msg, .true., 0, 0, 0, 0, 0.0d0, 0.0d0)
+      end if
+
+      return
+      end subroutine NcDef_unlim_dimension
 !EOC
 !-------------------------------------------------------------------------
 !BOP

@@ -7,8 +7,9 @@ SUBROUTINE PARSE_COMMAND_LINE
     INTEGER :: START_DATE, END_DATE
     CHARACTER(80) :: ARG
 
-    INTEGER, PARAMETER :: MAX_CYCLE_DAYS = 367
+    INTEGER, PARAMETER :: MAX_CYCLE_DAYS = 30
     INTEGER, PARAMETER :: MAX_CYCLES = 200
+    INTEGER, PARAMETER :: MAX_RUN_DAYS = 367
 
     ARG_COUNT = COMMAND_ARGUMENT_COUNT()
 
@@ -26,68 +27,127 @@ SUBROUTINE PARSE_COMMAND_LINE
         CALL PRINT_USAGE(FULL = .TRUE.)
     END IF
 
-    IF(ARG_COUNT /= 6) CALL PRINT_USAGE
+    IF(ARG_COUNT /= 5 .and. ARG_COUNT /= 6) CALL PRINT_USAGE
 
-    READ(ARG, *) ENUMBER
-    IF (ENUMBER == 0) THEN
-        PRINT *, "Running as ensemble control"
-    ELSE IF (ENUMBER > 0 .AND. ENUMBER < MAX_ENSEMBLE_MEMBERS) THEN
-        WRITE(*, '(A,I4)'), "Running as ensemble #", ENUMBER
-    ELSE
-        STOP "Bad ensemble number"
-    END IF
+    SELECT CASE (ARG_COUNT)
 
-    ! cycle number
-    CALL GET_COMMAND_ARGUMENT(2, ARG)
-    READ(ARG, *) CYCLE_NUM
-    IF (CYCLE_NUM < 0 .OR. CYCLE_NUM > MAX_CYCLES) THEN
-        STOP "Bad cycle number"
-    END IF
+       CASE (5)
 
-    PRINT *, "Cycle number =", CYCLE_NUM
+         READ(ARG, *) ENUMBER
+         IF (ENUMBER == 0) THEN
+             PRINT *, "Running as ensemble control"
+         ELSE IF (ENUMBER > 0 .AND. ENUMBER < MAX_ENSEMBLE_MEMBERS) THEN
+          WRITE(*, '(A,I4)'), "Running as ensemble #", ENUMBER
+         ELSE
+          STOP "Bad ensemble number"
+         END IF
 
-    ! lag number
-    CALL GET_COMMAND_ARGUMENT(3, ARG)
-    READ(ARG, *) LAG_NUM
-    IF (LAG_NUM < 1 .OR. LAG_NUM > 6) THEN
-        STOP "Bad lag number"
-    END IF
+         ! cycle number
+         CALL GET_COMMAND_ARGUMENT(2, ARG)
+         READ(ARG, *) CYCLE_NUM
+         IF (CYCLE_NUM < 0 .OR. CYCLE_NUM > MAX_CYCLES) THEN
+             STOP "Bad cycle number"
+         END IF
 
-    PRINT *, "Lag number =", LAG_NUM
+         PRINT *, "Cycle number =", CYCLE_NUM
 
-    ! start date
-    CALL GET_COMMAND_ARGUMENT(4, ARG)
-    READ(ARG, *) START_DATE
-    CALL SET_BEGIN_TIME(START_DATE, 0)
-    PRINT *, "Cycle start date =", START_DATE
+         ! start date
+         CALL GET_COMMAND_ARGUMENT(3, ARG)
+         READ(ARG, *) START_DATE
+         CALL SET_BEGIN_TIME(START_DATE, 0)
+         PRINT *, "Cycle start date =", START_DATE
 
-    ! cycle length in days
-    CALL GET_COMMAND_ARGUMENT(5, ARG)
-    READ(ARG, *) DAYS
-    READ(ARG, *) CYCLE_LEN
-    IF (0 < DAYS .AND. DAYS <= MAX_CYCLE_DAYS) THEN
-        CALL INCREMENT_DATE(START_DATE, DAYS, END_DATE)
-        CALL SET_END_TIME(END_DATE, 0)
-        PRINT *, "Cycle end date   =", END_DATE
-    ELSE
-        STOP "Bad cycle count"
-    END IF
+         ! cycle length in days
+         CALL GET_COMMAND_ARGUMENT(4, ARG)
+         READ(ARG, *) DAYS
+         READ(ARG, *) CYCLE_LEN
+         IF (0 < DAYS .AND. DAYS <= MAX_CYCLE_DAYS) THEN
+             CALL INCREMENT_DATE(START_DATE, DAYS, END_DATE)
+             CALL SET_END_TIME(END_DATE, 0)
+             PRINT *, "Cycle end date   =", END_DATE
+         ELSE
+             STOP "Bad cycle count"
+         END IF
 
-    ! forward opt mean run?
-    CALL GET_COMMAND_ARGUMENT(6, ARG)
-    READ(ARG, *) RERUN
+         ! forward opt mean run?
+         CALL GET_COMMAND_ARGUMENT(5, ARG)
+         READ(ARG, *) RERUN
 
-    IF (RERUN .NE. 0 .AND. RERUN .NE. 1) THEN
-        STOP "Bad rerun number"
-    END IF
+         IF (RERUN .NE. 0 .AND. RERUN .NE. 1) THEN
+             STOP "Bad rerun number"
+         END IF
 
-    IF(RERUN) THEN
-      PRINT *, "Running optimized mean forward (serial)"
-    ELSE
-      PRINT *, "Running full ensemble forward"
-    ENDIF
+         IF(RERUN) THEN
+           PRINT *, "Running optimized mean forward (serial)"
+         ELSE
+           PRINT *, "Running full ensemble forward"
+         ENDIF
 
-    PRINT *, ""
+         PRINT *, ""
+
+      CASE (6)
+
+        READ(ARG, *) ENUMBER
+         IF (ENUMBER == 0) THEN
+             PRINT *, "Running as ensemble control"
+         ELSE IF (ENUMBER > 0 .AND. ENUMBER < MAX_ENSEMBLE_MEMBERS) THEN
+          WRITE(*, '(A,I4)'), "Running as ensemble #", ENUMBER
+         ELSE
+          STOP "Bad ensemble number"
+         END IF
+
+         ! cycle number
+         CALL GET_COMMAND_ARGUMENT(2, ARG)
+         READ(ARG, *) CYCLE_NUM
+         IF (CYCLE_NUM < 0 .OR. CYCLE_NUM > MAX_CYCLES) THEN
+             STOP "Bad cycle number"
+         END IF
+
+         PRINT *, "Cycle number =", CYCLE_NUM
+
+         ! start date
+         CALL GET_COMMAND_ARGUMENT(3, ARG)
+         READ(ARG, *) START_DATE
+         CALL SET_BEGIN_TIME(START_DATE, 0)
+         PRINT *, "Cycle start date =", START_DATE
+
+         ! run length in days
+         CALL GET_COMMAND_ARGUMENT(4, ARG)
+         READ(ARG, *) DAYS
+         IF (0 < DAYS .AND. DAYS <= MAX_RUN_DAYS) THEN
+             CALL INCREMENT_DATE(START_DATE, DAYS, END_DATE)
+             CALL SET_END_TIME(END_DATE, 0)
+             PRINT *, "Run end date   =", END_DATE
+         ELSE
+             STOP "Bad run length count (days)"
+         END IF
+
+         ! cycle length in days
+         CALL GET_COMMAND_ARGUMENT(5, ARG)
+         READ(ARG, *) CYCLE_LEN
+         !IF (0 > DAYS .OR. DAYS > MAX_CYCLE_DAYS) THEN
+         IF (0 > DAYS .OR. DAYS > MAX_RUN_DAYS) THEN
+             STOP "Bad cycle count"
+         END IF
+
+         ! forward opt mean run?
+         CALL GET_COMMAND_ARGUMENT(6, ARG)
+         READ(ARG, *) RERUN
+
+         IF (RERUN .NE. 0 .AND. RERUN .NE. 1) THEN
+             STOP "Bad rerun number"
+         END IF
+
+         IF(RERUN) THEN
+           PRINT *, "Running optimized mean forward (serial)"
+         ELSE
+           PRINT *, "Running full ensemble forward"
+         ENDIF
+
+         PRINT *, ""
+
+     END SELECT
+
 CONTAINS
 
     SUBROUTINE PRINT_USAGE(FULL)
@@ -100,12 +160,12 @@ CONTAINS
             PRINT *, "Where:"
             PRINT *, "  ENSEMBLE_NUMBER - the rank of this member in the ensemble"
             PRINT *, "  CYCLE_NUM       - the cardinal number for this cycle"
-            PRINT *, "  LAG_NUM         - the lag #, 1=last est, 6=first est"
             PRINT *, "  START_DATE      - the starting date for this cycle run.  An integer of"
             PRINT *, "                    format YYYYMMDD as in the input.geos file. Overrides"
             PRINT *, "                    the value in input.geos because an ensemble run will"
             PRINT *, "                    go through different start dates in each cycle."
-            PRINT *, "  CYCLE_LEN       - the length of this cycle in days"
+            PRINT *, "  RUN_LEN         - the length of the run in days"
+            PRINT *, "  [CYCLE_LEN]       - the length of a lag cycle in days"
             PRINT *, "  RERUN           - 0: running normal ensemble "
             PRINT *, "                 -  1: rerunning serial run with mean optimized flux"
             PRINT *, "                      in order to get restart CO2 for next cycle"

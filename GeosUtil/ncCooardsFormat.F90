@@ -18,7 +18,7 @@ module ncCooardsFormat
     integer, save :: latID, lonID, levID, timeID, varID
 
     ! Handles for the file, dimensions, and variables
-    integer, save :: stationFileNCID, gosatOutputNCID
+    integer, save :: stationFileNCID, gosatOutputNCID, ctOutputNCID
     integer, save :: sLatID, sLonID, sLevID, sTimeID, sVarID,sNameID
     integer, save :: gLatID, gLonID, gLevID, gTimeID, gVarID,gNameID
     integer, save :: gVarID1,gVarID2,gVarID3
@@ -158,12 +158,114 @@ module ncCooardsFormat
 
         subroutine ncGOSATOutputClose
 
-          print *, "closing nc gosat output file", gosatOutputNCID
+          print *, "closing nc bling bling gosat output file", gosatOutputNCID
 
-          call handleError(nf90_close(gosatOutputNCID))
+          call gosatCloseError(nf90_close(gosatOutputNCID))
 
         end subroutine ncGOSATOutputClose
 
+ subroutine ncCTOutputCreate(filename, nSoundings, sounding_id,xco2_obs,xco2_uncert,   &
+                 xco2pbl_obs,xco2pbl_uncert,xco2ft_obs,xco2ft_uncert,varName1,varName2,varName3)
+! subroutine ncGOSATOutputCreate(filename, nSoundings, sounding_id,varName)
+        !   This subroutine creates a file to hold timeseries data for multiple stations.
+        !   nStation:  number of stations
+        !   nTime:     number of timesteps
+        !   varName:   variable name
+
+            character (len = *)      ::  filename
+            character (len = *)      ::  varName1,varName2,varName3
+        !   Need to add stationName to the argument list when ready
+            integer                  :: soundingDimID, nSoundings
+            integer                  :: sVarID2 ,sVarID3,sVarID4
+            integer                  :: sVarID5 ,sVarID6,sVarID7,sVarID8
+            character,dimension(:,:)   :: sounding_id
+            real*8, dimension(:)       :: xco2_obs,xco2_uncert
+            real*8, dimension(:)       :: xco2pbl_obs,xco2pbl_uncert
+            real*8, dimension(:)       :: xco2ft_obs,xco2ft_uncert
+
+            !integer, parameter :: mode_flag = IOR(nf90_hdf5, nf90_classic_model) ! | nf90_clobber
+            integer, parameter :: mode_flag = nf90_hdf5
+!           integer, parameter :: deflatelevel = 6
+
+            print *,'uncert:',xco2_uncert
+            print *,'sid:',sounding_id
+            print *,'xco2:',xco2_obs
+
+            ! Create file
+            call handleError(nf90_create(path=trim(filename), cmode=mode_flag, ncid=ctOutputNCID))
+
+            print *,'Opening/creating file ',trim(filename)
+
+            ! Define Dimensions
+            call handleError(nf90_def_dim(ctOutputNCID, "soundings", nSoundings, soundingDimID))
+
+            ! Define Variables
+            call handleError(nf90_def_var(ctOutputNCID, "sounding_id", nf90_char, soundingDimID, &
+                 sVarID2))
+
+            call handleError(nf90_def_var(ncid=ctOutputNCID, name="xco2_observed", xtype=nf90_double, &
+                 dimids=soundingDimID, varid=sVarID3))
+
+            call handleError(nf90_def_var(ncid=ctOutputNCID, name="xco2_uncertainty", xtype=nf90_double, &
+                 dimids=soundingDimID, varid=sVarID4))
+
+            call handleError(nf90_def_var(ncid=ctOutputNCID, name="xco2pbl_observed", xtype=nf90_double, &
+                 dimids=soundingDimID, varid=sVarID5))
+
+            call handleError(nf90_def_var(ncid=ctOutputNCID, name="xco2pbl_uncertainty", xtype=nf90_double, &
+                 dimids=soundingDimID, varid=sVarID6))
+
+            call handleError(nf90_def_var(ncid=ctOutputNCID, name="xco2freetrop_observed", xtype=nf90_double, &
+                 dimids=soundingDimID, varid=sVarID7))
+
+            call handleError(nf90_def_var(ncid=ctOutputNCID, name="xco2freetrop_uncertainty", xtype=nf90_double, &
+                 dimids=soundingDimID, varid=sVarID8))
+
+            call handleError(nf90_def_var(ncid=ctOutputNCID, name=varName1, xtype=nf90_double, dimids=soundingDimID, &
+                 varid=gVarID1))
+
+            call handleError(nf90_def_var(ncid=ctOutputNCID, name=varName2, xtype=nf90_double, dimids=soundingDimID, &
+                 varid=gVarID2))
+
+            call handleError(nf90_def_var(ncid=ctOutputNCID, name=varName3, xtype=nf90_double, dimids=soundingDimID, &
+                 varid=gVarID3))
+
+!                            deflate_level=deflatelevel))
+
+            ! Define Attributes
+            !call handleError(nf90_put_att(gosatOutputNCID, sVarID2, "long_name",                    &
+            !                                  "ACOS Sounding ID"))
+            !call handleError(nf90_put_att(gosatOutputNCID, sVarID2, "units", "MMDDYYhhmmss"))
+            !call handleError(nf90_put_att(gosatOutputNCID, sVarID2, "comment", "from scan start time in UTC"))
+
+            !call handleError(nf90_put_att(gosatOutputNCID, sVarID, "long_name",                    &
+            !                                  "Optimized value of Retrieved XCO2"))
+            !call handleError(nf90_put_att(gosatOutputNCID, sVarID, "units", "ppm"))
+
+
+            call handleError(nf90_enddef(ctOutputNCID))
+
+            call handleError(nf90_put_var(ctOutputNCID, sVarID2, sounding_id))
+            call handleError(nf90_put_var(ctOutputNCID, sVarID3, xco2_obs))
+            call handleError(nf90_put_var(ctOutputNCID, sVarID4, xco2_uncert))
+
+            call handleError(nf90_put_var(ctOutputNCID, sVarID5, xco2pbl_obs))
+            call handleError(nf90_put_var(ctOutputNCID, sVarID6, xco2pbl_uncert))
+            call handleError(nf90_put_var(ctOutputNCID, sVarID7, xco2ft_obs))
+            call handleError(nf90_put_var(ctOutputNCID, sVarID8, xco2ft_uncert))
+
+            ! Sync the file to make sure data is saved
+            call handleError(nf90_sync(ctOutputNCID))
+
+        end subroutine ncCTOutputCreate
+
+        subroutine ncCTOutputClose
+
+          print *, "closing nc CT output file", ctOutputNCID
+
+          call handleError(nf90_close(ctOutputNCID))
+
+        end subroutine ncCTOutputClose
 
         subroutine ncStationDataFileCreate(filename, nStation, sLon, sLat, sLev, &
                                    stationName, varName, varUnits, timeUnits)
@@ -327,17 +429,17 @@ module ncCooardsFormat
             call handleError(nf90_def_dim(fileNCID, "time", nf90_unlimited, timeDimId))
             dimids = (/ lonDimID, latDimID, levDimID, timeDimID /)
 
-            print *,'wrote dims'
+            !print *,'wrote dims'
             call handleError(nf90_def_var(fileNCID, "Levels", nf90_double, levDimID, levID))
             call handleError(nf90_def_var(fileNCID, "lon", nf90_double, lonDimID, lonID))
             call handleError(nf90_def_var(fileNCID, "lat", nf90_double, latDimID, latID))
             call handleError(nf90_def_var(fileNCID, "time", nf90_double, timeDimID, timeID))
-            print *,'defined dims'
+            !print *,'defined dims'
          DO i = 1,nVars
-            print *,'nVars:',i,'varID:',varID
+            !print *,'nVars:',i,'varID:',varID
             call handleError(nf90_def_var(fileNCID, varName(i), nf90_float, dimids, varID, & 
                         deflate_level=deflatelevel)) !,chunksizes=(/ nLon, nLat, 1, 1 /)))
-            print *,'defined ',varName(i)
+            !print *,'defined ',varName(i)
             ! Define Attributes
             call handleError(nf90_put_att(fileNCID, varID, "long_name", "PPM CO2"))
             call handleError(nf90_put_att(fileNCID, varID, "units", "PPM"))
@@ -640,5 +742,13 @@ module ncCooardsFormat
                 stop "Error with netcdf.  Stopped."
             end if
         end subroutine handleError
+
+        subroutine gosatCloseError(status)
+            integer :: status
+            if (status /= nf90_noerr) then
+                print *, trim(nf90_strerror(status))
+                print *, "NCDF output error.  Guessing there was no GOSAT output file to close...."
+            end if
+        end subroutine gosatCloseError
 
 end  module ncCooardsFormat

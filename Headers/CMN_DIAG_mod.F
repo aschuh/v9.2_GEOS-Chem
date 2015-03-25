@@ -193,6 +193,7 @@
       INTEGER :: ND50, ND51, ND52, ND54, ND55, ND57, ND58, ND59
       INTEGER :: ND60, ND61, ND62, ND63, ND64, ND65, ND66, ND67, ND68
       INTEGER :: ND69, ND70, ND71, ND72, ND73, ND74, ND75, ND80, ND81
+      INTEGER :: ND82
 
       !=================================================================
       ! Variables for printing out selected tracers in diagnostic output

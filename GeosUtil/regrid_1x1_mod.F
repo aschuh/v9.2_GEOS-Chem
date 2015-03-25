@@ -1037,6 +1037,8 @@
             IS_CONC = .TRUE.
          CASE ( 'molec/cm2'    )
             IS_CONC = .TRUE.
+         CASE ( 'molec/m2/s'  )
+            IS_CONC = .TRUE.
          CASE ( 'molec/cm2/s'  )
             IS_CONC = .TRUE.
          CASE ( 'molec C/cm2/s')

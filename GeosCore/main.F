@@ -79,9 +79,12 @@
       USE PLANEFLIGHT_MOD       ! For ND40  (plane flight track  ) diag
 
       !-- Added gosat and ascends satellite diags
-      USE GOSAT_MOD,         ONLY : GOSAT, SETUP_GOSAT
-      USE ASCENDS_MOD,       ONLY : ASCENDS, SETUP_ASCENDS
-
+      USE GOSAT_MOD,     ONLY : GOSAT,SETUP_GOSAT
+      USE NCCOOARDSFORMAT, ONLY: ncGOSATOutputClose
+      USE ASCENDS_MOD,   ONLY : ASCENDS,SETUP_ASCENDS
+      USE CT_MOD,        ONLY : CT,SETUP_CT,CT_FINISH_OUTPUT
+      USE NCCOOARDSFORMAT, ONLY: ncStationFileClose
+      USE CTFORMAT,      ONLY : ncCTOutputClose
       !-----------------------------------------------------------------
       ! GEOS-Chem dynamics modules
       !-----------------------------------------------------------------
@@ -120,6 +123,7 @@
       !-----------------------------------------------------------------
       ! Modules for the Grid-Independent GEOS-Chem (aka "GIGC")
       !-----------------------------------------------------------------
+      USE GIGC_In_Carbontracker_Mod
       USE GIGC_ErrCode_Mod      ! Error codes for success or failure
       USE GIGC_Environment_Mod  ! For allocating objects
       USE GIGC_Input_Opt_Mod    ! Derived type for Input Options 
@@ -310,6 +314,10 @@
       LOGICAL                  :: ITS_A_H2HD_SIM          
       INTEGER                  :: N_TRACERS 
       REAL*8,  POINTER         :: TCVV(:)
+      !-- Not exactly sure where to put this
+      TYPE(Carbontracker_In)  :: CT_Input_1,CT_Input_2, CT_Input_3   ! CT input objects
+      TYPE(Carbontracker_Out) :: CT_Output_1,CT_Output_2, CT_Output_3   ! CT input objects
+
       !-----------------------------------------------------------------
 
       !=================================================================
@@ -458,7 +466,10 @@
       ! (bmy, 3/4/13)
       !
       CALL GIGC_Init_All
-     &   ( am_I_Root, Input_Opt, State_Chm, State_Met, RC )
+     &   ( am_I_Root, Input_Opt, State_Chm, State_Met,
+     &      CT_Input_1,CT_Input_2,CT_Input_3,CT_Output_1,CT_Output_2,
+     &      CT_Output_3, RC )
+      print *,'through main alloc'
       !
       ! Also allocate arrays in GEOS-Chem modules that have not yet
       ! been initialized (i.e. SEASALT_MOD, CARBON_MOD,  DUST_MOD, 
@@ -1300,6 +1311,27 @@
             ENDIF
          ENDIF
 
+         ! GOSAT following diagnostic
+         IF ( ND82 > 0 ) THEN
+
+            ! Call SETUP_CT routine if necessary
+            IF ( ITS_A_NEW_DAY() ) THEN
+
+               ! If it's a full-chemistry simulation but LCHEM=F,
+               ! or if it's an offline simulation, call setup routine
+               IF ( ITS_A_FULLCHEM_SIM ) THEN
+                  IF ( .not. LCHEM ) CALL SETUP_CT( am_I_Root, 
+     &             CT_Input_1, CT_Input_2,CT_Input_3,CT_Output_1,
+     &              CT_Output_2, CT_Output_3 )
+               ELSE
+                  PRINT *,'calling SETUP_CT'
+                  CALL SETUP_CT( am_I_Root,
+     &             CT_Input_1, CT_Input_2,CT_Input_3,CT_Output_1,
+     &               CT_Output_2, CT_Output_3 )
+               ENDIF
+            ENDIF
+         ENDIF
+
          ! Plane following diagnostic
          IF ( ND40 > 0 .and. DO_DIAG_WRITE ) THEN 
          
@@ -1365,6 +1397,27 @@
                PRINT *,'CALLING GOSAT'
                CALL GOSAT
      &            ( am_I_Root, Input_Opt, State_Met, State_Chm, RC )
+            ENDIF
+
+            ! Plane following diagnostic
+            IF ( ND82 > 0 ) THEN
+
+               ! Archive data along the flight track
+               !PRINT *,'CALLING CT WITH CT_Input_1'
+               !PRINT *,'max nsamples val:',MAXVAL(CT_Output_1%NSAMPLES)
+               CALL CT
+     &            ( am_I_Root, Input_Opt, State_Met, State_Chm, 
+     &                  CT_Input_1,CT_Output_1, RC )
+               !PRINT *,'CALLING CT WITH CT_Input_2'
+               !PRINT *,'max nsamples val:',MAXVAL(CT_Output_2%NSAMPLES)
+               CALL CT
+     &            ( am_I_Root, Input_Opt, State_Met, State_Chm,
+     &                  CT_Input_2,CT_Output_2, RC )
+               !PRINT *,'CALLING CT WITH CT_Input_3'
+               !PRINT *,'max nsamples val:',MAXVAL(CT_Output_3%NSAMPLES)
+               CALL CT
+     &            ( am_I_Root, Input_Opt, State_Met, State_Chm,
+     &                  CT_Input_3,CT_Output_3, RC )
             ENDIF
 
             ! Plane following diagnostic
@@ -1517,6 +1570,16 @@
       ! Deallocate fields of the Meteorology State object
       CALL Cleanup_GIGC_State_Met( am_I_Root, State_Met, RC )
       IF ( prtDebug ) CALL DEBUG_MSG( '### MAIN: a cleanup State_met' )
+
+      ! Close all files
+      IF (  ND80 > 0 ) CALL ncGOSATOutputClose
+      !IF (  ND82 > 0 ) CALL ncCTOutputClose
+      IF ( ND82 > 0 ) 
+     &  CALL CT_FINISH_OUTPUT (
+     &       am_I_Root,CT_Input_1,CT_Input_2,
+     &              CT_Output_1, CT_Output_2)
+
+      IF ( DO_SAVE_DIAG48 ) CALL ncStationFileClose
 
       ! Deallocate dynamic module arrays
       CALL CLEANUP( am_I_Root, RC )

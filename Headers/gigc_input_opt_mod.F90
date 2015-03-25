@@ -62,6 +62,7 @@ MODULE GIGC_Input_Opt_Mod
      CHARACTER(LEN=255)          :: OCEAN_DIR
      CHARACTER(LEN=255)          :: GENERIC_FLUX_DIR
      CHARACTER(LEN=255)          :: GENERIC_FLUX_VAR
+     CHARACTER(LEN=255)          :: CT_FLUX_DIR
      CHARACTER(LEN=255)          :: FOSSIL_DIR
      CHARACTER(LEN=255)          :: TEMP_DIR           
      LOGICAL                     :: LUNZIP             
@@ -182,6 +183,7 @@ MODULE GIGC_Input_Opt_Mod
      ! CO2 MENU fields
      !----------------------------------------
      LOGICAL                     :: LGENFLX
+     LOGICAL                     :: LCTFLUX
      LOGICAL                     :: LGENFF
      LOGICAL                     :: LANNFF
      LOGICAL                     :: LMONFF
@@ -725,6 +727,7 @@ CONTAINS
     Input_Opt%DATA_DIR_1x1           = ''
     Input_Opt%GENERIC_FLUX_DIR       = ''
     Input_Opt%GENERIC_FLUX_VAR       = ''
+    Input_Opt%CT_FLUX_DIR            = ''
     Input_Opt%FOSSIL_DIR             = ''
     Input_Opt%SIB_DIR                = ''
     Input_Opt%OCEAN_DIR              = ''
@@ -861,6 +864,7 @@ CONTAINS
     ! CO2 MENU fields
     !----------------------------------------
     Input_Opt%LGENFLX                = .FALSE.
+    Input_Opt%LCTFLUX                = .FALSE.
     Input_Opt%LODAFF                 = .FALSE.
     Input_Opt%LGENFF                 = .FALSE.
     Input_Opt%LANNFF                 = .FALSE.

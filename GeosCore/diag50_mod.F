@@ -217,9 +217,9 @@
       CALL ACCUMULATE_DIAG50
      &    ( am_I_Root, Input_Opt, State_Met, State_Chm, RC )
 
-      print *,'ITS_TIME_FOR_WRITE_DIAG50():',ITS_TIME_FOR_WRITE_DIAG50()
-      print *,'(.not. DO_SAVE_DIAG50_LAST):',(.not. DO_SAVE_DIAG50_LAST)
-      print *,'Input_Opt%DO_DIAG_WRITE:',Input_Opt%DO_DIAG_WRITE 
+      !print *,'ITS_TIME_FOR_WRITE_DIAG50():',ITS_TIME_FOR_WRITE_DIAG50()
+      !print *,'(.not. DO_SAVE_DIAG50_LAST):',(.not. DO_SAVE_DIAG50_LAST)
+      !print *,'Input_Opt%DO_DIAG_WRITE:',Input_Opt%DO_DIAG_WRITE 
 
       ! Write data to disk at the end of the day
       IF ( ITS_TIME_FOR_WRITE_DIAG50() .and. 
@@ -918,8 +918,8 @@
      &   .and. GET_MINUTE() == 0)
 
       ITS_LAST_TIME = GET_TAUe() - GET_TAUb() == GET_ELAPSED_MIN()/60
-      PRINT *,'LAST:',ITS_LAST_TIME,'left:',GET_TAUe() - GET_TAUb()
-      PRINT *,'right:',GET_ELAPSED_MIN()/60
+      !PRINT *,'LAST:',ITS_LAST_TIME,'left:',GET_TAUe() - GET_TAUb()
+      !PRINT *,'right:',GET_ELAPSED_MIN()/60
 
       ITS_TIME = ITS_TIME .and. ITS_LAST_TIME
 
@@ -1206,7 +1206,9 @@
       !=================================================================
       DO W = 1, ND50_N_TRACERS
 
-         ! ND50 tracer number
+         !print *,'writing ',W,' of ',ND50_N_TRACERS,' tracers'
+         !print *,'nd50_tracers(1:5):',nd50_tracers(1:5) 
+        ! ND50 tracer number
          N = ND50_TRACERS(W)
 
          ! Save by simulation

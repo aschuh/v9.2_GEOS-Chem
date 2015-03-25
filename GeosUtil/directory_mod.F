@@ -24,6 +24,7 @@
       CHARACTER(LEN=255) :: DATA_DIR_1x1  ! Root data dir for 1x1 emissions
       CHARACTER(LEN=255) :: GENERIC_FLUX_DIR    ! Root data dir for generic combined emissions
       CHARACTER(LEN=255) :: GENERIC_FLUX_VAR    ! NETCDF var name for generic combined emissions
+      CHARACTER(LEN=255) :: CT_FLUX_DIR          ! Root data dir for CT fluxes
       CHARACTER(LEN=255) :: FOSSIL_DIR          ! Root data dir for fossil emissions
       CHARACTER(LEN=255) :: SIB_DIR             ! Root data dir for SiB fluxes
       CHARACTER(LEN=255) :: OCEAN_DIR           ! Root data dir for ocean fluxes

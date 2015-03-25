@@ -743,6 +743,8 @@
       NIND = 1
 
       DO N= 1,nVars
+
+      print *,'looking for varid:',N
          status = nf90_inquire_variable(ncid=ncid,varid=N,name=varname)
          if (status /= nf90_noerr) then
                 print *, trim(nf90_strerror(status))
@@ -751,6 +753,7 @@
                 IF(INDEX(varname,'Tracer') /= 0)   THEN
                        vars(NIND) = varname
                        NIND = NIND + 1
+                     print *,'found:',varname
                 ENDIF
          endif
       ENDDO

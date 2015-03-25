@@ -231,6 +231,7 @@
       !%%%% For the CO2 offline simulation only %%%%
       LOGICAL :: LGENFLX
       LOGICAL :: LGENFF      
+      LOGICAL :: LCTFLUX
       LOGICAL :: LANNFF      
       LOGICAL :: LMONFF 
       LOGICAL :: LODAFF     

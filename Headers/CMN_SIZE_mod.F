@@ -516,6 +516,9 @@
       ! SOAupdate: add 1 for naphthalene, now 26 (hotp 7/21/10)
       INTEGER, PARAMETER :: NBIOMAX = 26
 
+      ! MAXNOBS for CarbonTracker I/O
+      INTEGER, PARAMETER :: MAXNOBS = 10000
+
 #if   defined( TOMAS )
       INTEGER, PARAMETER :: TOMASSPEC = 8
 
