@@ -83,6 +83,8 @@
       USE NCCOOARDSFORMAT, ONLY: ncGOSATOutputClose
       USE ASCENDS_MOD,   ONLY : ASCENDS,SETUP_ASCENDS
       USE CT_MOD,        ONLY : CT,SETUP_CT,CT_FINISH_OUTPUT
+      USE CT_MOD,        ONLY : SETUP_CT_OCFL_OUT
+      USE ENKF_MOD,          ONLY : ENUMBER
       USE NCCOOARDSFORMAT, ONLY: ncStationFileClose
       USE CTFORMAT,      ONLY : ncCTOutputClose
       !-----------------------------------------------------------------
@@ -1328,6 +1330,23 @@
                   CALL SETUP_CT( am_I_Root,
      &             CT_Input_1, CT_Input_2,CT_Input_3,CT_Output_1,
      &               CT_Output_2, CT_Output_3 )
+               ENDIF
+            ENDIF
+         ENDIF
+
+         ! CT Output for Ocean Fluxes
+         IF ( LCTFLUX ) THEN
+
+            ! Call SETUP_CT routine if necessary
+            IF ( ITS_A_NEW_DAY() .and. ( ENUMBER .eq. 1 ) ) THEN
+
+               ! If it's a full-chemistry simulation but LCHEM=F,
+               ! or if it's an offline simulation, call setup routine
+               IF ( ITS_A_FULLCHEM_SIM ) THEN
+                  IF ( .not. LCHEM ) CALL SETUP_CT_OCFL_OUT( )
+               ELSE
+                  PRINT *,'calling SETUP_CT_OCFLOUT'
+                  CALL SETUP_CT_OCFL_OUT( )
                ENDIF
             ENDIF
          ENDIF

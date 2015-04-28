@@ -831,6 +831,7 @@
          !READ( SOUNDING_ID_CHAR(11:12), '(i)' ) QMN
 
          JULNDAY = TIM(N)/86400 + 2440587.5
+         PRINT *,'GOSAT/JULNDAY:',JULNDAY
          CALL CALDATE( JULNDAY, YYYYMMDD, HHMMSS )
 
          CALL YMD_EXTRACT( YYYYMMDD, QYY, QMM, QDD ) 
@@ -2402,7 +2403,7 @@
 !EOP
 !------------------------------------------------------------------------------
 !BOC
-      CALL ncGOSATOutputClose
+      !CALL ncGOSATOutputClose
 
       IF ( ALLOCATED( PVAR   ) ) DEALLOCATE( PVAR   )
       IF ( ALLOCATED( PREAC  ) ) DEALLOCATE( PREAC  )

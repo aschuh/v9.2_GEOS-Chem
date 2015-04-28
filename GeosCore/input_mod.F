@@ -332,7 +332,7 @@
 
          ELSE IF ( INDEX( LINE, 'EMISSIONS MENU'   ) > 0 ) THEN
             CALL READ_EMISSIONS_MENU( am_I_Root, Input_Opt, RC )             
-
+         PRINT *,'DONENNNNNN'
          ELSE IF ( INDEX( LINE, 'FUTURE MENU'      ) > 0 ) THEN
             CALL READ_FUTURE_MENU( am_I_Root, Input_Opt, RC ) 
                                                    
@@ -383,6 +383,9 @@
          ELSE IF ( INDEX( LINE, 'PLANEFLIGHT MENU' ) > 0 ) THEN
             CALL READ_PLANEFLIGHT_MENU( am_I_Root, Input_Opt, RC )             
                                                   
+         ELSE IF ( INDEX( LINE, 'CT MENU' ) > 0 ) THEN
+            CALL READ_CT_MENU
+
          ELSE IF ( INDEX( LINE, 'ND48 MENU'        ) > 0 ) THEN
             CALL READ_ND48_MENU( am_I_Root, Input_Opt, RC )                  
 
@@ -687,6 +690,7 @@
       USE DIRECTORY_MOD,      ONLY : DATA_DIR,  DATA_DIR_1x1, GCAP_DIR
       USE DIRECTORY_MOD,      ONLY : FOSSIL_DIR,  SIB_DIR,   OCEAN_DIR
       USE DIRECTORY_MOD,      ONLY : GENERIC_FLUX_DIR, GENERIC_FLUX_VAR
+      USE DIRECTORY_MOD,      ONLY : CT_FLUX_DIR
       USE DIRECTORY_MOD,      ONLY : GEOS_4_DIR,  GEOS_5_DIR
       USE DIRECTORY_MOD,      ONLY : MERRA_DIR,   GEOS_FP_DIR
       USE DIRECTORY_MOD,      ONLY : RUN_DIR
@@ -877,28 +881,32 @@
       CALL SPLIT_ONE_LINE( SUBSTRS, N, 1, 'read_simulation_menu:19' )
       READ( SUBSTRS(1:N), '(a)' ) OCEAN_DIR
 
-      ! Temp dir
+      !  CarbonTracker data dir containing NetCDF files
       CALL SPLIT_ONE_LINE( SUBSTRS, N, 1, 'read_simulation_menu:20' )
+      READ( SUBSTRS(1:N), '(a)' ) CT_FLUX_DIR
+
+      ! Temp dir
+      CALL SPLIT_ONE_LINE( SUBSTRS, N, 1, 'read_simulation_menu:21' )
       READ( SUBSTRS(1:N), '(a)' ) TEMP_DIR
 
       ! Unzip met fields
-      CALL SPLIT_ONE_LINE( SUBSTRS, N, 1, 'read_simulation_menu:21' )
+      CALL SPLIT_ONE_LINE( SUBSTRS, N, 1, 'read_simulation_menu:22' )
       READ( SUBSTRS(1:N), *     ) LUNZIP
 
       ! Wait for met fields?
-      CALL SPLIT_ONE_LINE( SUBSTRS, N, 1, 'read_simulation_menu:22' )
+      CALL SPLIT_ONE_LINE( SUBSTRS, N, 1, 'read_simulation_menu:23' )
       READ( SUBSTRS(1:N), *     ) LWAIT
 
       ! Variable Tropopause
-      CALL SPLIT_ONE_LINE( SUBSTRS, N, 1, 'read_simulation_menu:23' )
+      CALL SPLIT_ONE_LINE( SUBSTRS, N, 1, 'read_simulation_menu:24' )
       READ( SUBSTRS(1:N), *     ) LVARTROP
 
       ! I0, J0
-      CALL SPLIT_ONE_LINE( SUBSTRS, N, 2, 'read_simulation_menu:24' )
+      CALL SPLIT_ONE_LINE( SUBSTRS, N, 2, 'read_simulation_menu:25' )
       READ( SUBSTRS(1:N), *     ) I0, J0
 
       ! Separator line
-      CALL SPLIT_ONE_LINE( SUBSTRS, N, 1, 'read_simulation_menu:25' )
+      CALL SPLIT_ONE_LINE( SUBSTRS, N, 1, 'read_simulation_menu:26' )
 
       !=================================================================
       ! Add safety checks for logical switches
@@ -972,6 +980,7 @@
       Input_Opt%FOSSIL_DIR    = FOSSIL_DIR
       Input_Opt%SIB_DIR       = SIB_DIR
       Input_Opt%OCEAN_DIR     = OCEAN_DIR
+      Input_Opt%CT_FLUX_DIR    = CT_FLUX_DIR
       Input_Opt%TEMP_DIR      = TEMP_DIR
       Input_Opt%LUNZIP        = LUNZIP
       Input_Opt%LWAIT         = LWAIT
@@ -3102,6 +3111,7 @@
         WRITE( 6, 100 ) 'Turn on historical emiss?   : ', LHIST
         WRITE( 6, 100 ) 'Turn on the Warwick VSLs?   : ', LWARWICK_VSLS
         WRITE( 6, 100 ) 'Use seasalt Br2 emissions?  : ', LSSABr2
+        PRINT *,'LFIX:',Br_SCALING
         WRITE( 6, 100 ) 'Set day PBL BrO conc to 1ppt: ', LFIX_PBL_BRO
         WRITE( 6, 100 ) 'Bromine emiss scale factor  : ', Br_SCALING
       ENDIF
@@ -3191,6 +3201,10 @@
       ! Use Kawa ASCENDS Generic Flux Field
       CALL SPLIT_ONE_LINE( SUBSTRS, N, 1, 'read_CO2_sim_menu:2' )
       READ( SUBSTRS(1:N), * ) LGENFLX
+
+      ! Use CT flux components
+      CALL SPLIT_ONE_LINE( SUBSTRS, N, 1, 'read_CO2_sim_menu:3' )
+      READ( SUBSTRS(1:N), * ) LCTFLUX
 
       !---------------------------------------------------------------
       ! Fossil Fuel Emissions
@@ -3351,6 +3365,7 @@
         IF (LGENFLX) THEN
                 LMONFF = .FALSE.
                 LGENFF = .FALSE.
+                LCTFLUX = .FALSE.
                 LANNFF = .FALSE.
                 LODAFF = .FALSE.
                 L8DAYBB  = .FALSE.
@@ -3429,6 +3444,7 @@
       ! Set fields of Input Options object
       !=================================================================
       Input_Opt%LGENFF      = LGENFF
+      Input_Opt%LCTFLUX     = LCTFLUX
       Input_Opt%LANNFF      = LANNFF
       Input_Opt%LMONFF      = LMONFF
       Input_Opt%LODAFF      = LODAFF
@@ -5853,6 +5869,123 @@
       CALL SET_ASCENDS( DO_ASCENDS, IFILE, OFILE )
 
       END SUBROUTINE READ_ASCENDS_MENU
+!EOC
+!------------------------------------------------------------------------------
+!          Harvard University Atmospheric Chemistry Modeling Group            !
+!------------------------------------------------------------------------------
+!BOP
+!
+! !IROUTINE: read_ct_menu
+!
+! !DESCRIPTION: Subroutine READ\_CT\_MENU reads the CarbonTracker MENU
+!  section of the GEOS-Chem input file.  This turns on the ND81 flight track
+!  diagnostic.
+!\\
+!\\
+! !INTERFACE:
+!
+      SUBROUTINE READ_CT_MENU
+!
+! !USES:
+!
+      USE ERROR_MOD,       ONLY : ERROR_STOP
+      USE CT_MOD,       ONLY : SET_CT
+      USE CMN_SIZE_MOD             ! MAXFAM
+      USE CMN_DIAG_MOD             ! ND81
+      USE ENKF_MOD,        ONLY : LENKF, ENUMBER, RERUN
+      USE CHARPAK_MOD,     ONLY : STRREPL
+
+!
+! !REVISION HISTORY:
+!  20 Jul 2004 - R. Yantosca - Initial version
+!  27 Aug 2010 - R. Yantosca - Added ProTeX headers
+!EOP
+!------------------------------------------------------------------------------
+!BOC
+!
+! !LOCAL VARIABLES:
+!
+      LOGICAL            :: DO_CT
+      INTEGER            :: N
+      CHARACTER(LEN=255) :: IFILE
+      CHARACTER(LEN=255) :: OFILE, OFILE2
+      CHARACTER(LEN=255) :: SUBSTRS(MAXDIM), MSG
+      CHARACTER(LEN=4)  :: CENUMBER
+
+      !=================================================================
+      ! READ_GOSAT_MENU begins here!
+      !=================================================================
+
+      ! Error check
+      IF ( CT1 /= 2 ) THEN
+         MSG = 'SIMULATION MENU & TRACER MENU must be read in first!'
+         CALL ERROR_STOP( MSG, 'READ_CT_MENU ("input_mod.f")' )
+      ENDIF
+
+      ! Initialize
+      ND82          = 0
+      DO_CT         = .FALSE.
+      IFILE         = ''
+      OFILE         = ''
+      OFILE2        = ''
+      print *,'here -1'
+      ! Turn on ascends diagnostic?
+      CALL SPLIT_ONE_LINE( SUBSTRS, N, 1,  'read_ct_menu:1' )
+      READ( SUBSTRS(1:N), * ) DO_CT
+      print *,'here 0'
+      ! Set ND82 flag from DO_CT
+      IF ( DO_CT ) ND82 = 1
+      print *,'here1'
+
+      ! Input file name (w/ flight track data points)
+      CALL SPLIT_ONE_LINE( SUBSTRS, N, 1,  'read_ct_menu:2' )
+      READ( SUBSTRS(1:N), '(a)' ) IFILE
+      print *,'here2'
+
+      ! Output file name
+      CALL SPLIT_ONE_LINE( SUBSTRS, N, 1,  'read_ct_menu:3' )
+      READ( SUBSTRS(1:N), '(a)' ) OFILE
+      print *,'here2'
+      IF ( LENKF ) THEN
+        write(CENUMBER, '(i4.4)') ENUMBER
+
+        PRINT *,'TRIM(CENUMBER):',TRIM(CENUMBER)
+        PRINT *,'TRIM(OFILE):',TRIM(OFILE)
+        OFILE = TRIM(OFILE) // '.' // CENUMBER
+        !CALL STRREPL( FILE, 'ENSNUMB', TRIM(CENUMBER) )
+      ENDIF
+
+      IF ( RERUN .eq. 1 ) THEN
+           OFILE = TRIM(OFILE) // '.FINALRUN'
+      ENDIF
+
+      ! Input file name (w/ flight track data points)
+      CALL SPLIT_ONE_LINE( SUBSTRS, N, 1,  'read_ct_menu:4' )
+      READ( SUBSTRS(1:N), '(a)' ) OFILE2
+      print *,'here2'
+
+
+      !=================================================================
+      ! Print to screen
+      !=================================================================
+      WRITE( 6, '(/,a)' ) 'CT MENU'
+      WRITE( 6, '(  a)' ) '----------------'
+      WRITE( 6, 100     ) 'Turn on ct diag?   : ', DO_CT
+      WRITE( 6, 110     ) 'Flight track input file     : ', TRIM(IFILE)
+      WRITE( 6, 110     ) 'Output file name            : ', TRIM(OFILE)
+
+      ! FORMAT statements
+ 100  FORMAT( A, L5    )
+ 110  FORMAT( A, A     )
+
+      !=================================================================
+      ! Call setup routines from other F90 modules
+      !=================================================================
+
+      ! Pass variables to "planeflight_mod.f"
+      CALL SET_CT( DO_CT, IFILE, OFILE , OFILE2)
+
+      END SUBROUTINE READ_CT_MENU
 !EOC
 !------------------------------------------------------------------------------
 !          Harvard University Atmospheric Chemistry Modeling Group            !
@@ -9121,6 +9254,7 @@
       DATA_DIR       = ''
       DATA_DIR_1x1   = ''
       GENERIC_FLUX_DIR   = ''
+      CT_FLUX_DIR        = ''
       FOSSIL_DIR         = ''
       SIB_DIR            = ''
       OCEAN_DIR          = ''
@@ -9207,6 +9341,7 @@
       
       !Specifically for CO2 simulation (R Nassar, 2009-03-02)
       LGENFLX       = .FALSE.
+      LCTFLUX       = .FALSE.
       LGENFF         = .FALSE.
       LANNFF         = .FALSE.
       LMONFF         = .FALSE.

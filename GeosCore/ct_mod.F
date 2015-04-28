@@ -29,6 +29,7 @@
       PUBLIC  :: SETUP_CT
       PUBLIC  :: SET_CT
       PUBLIC  :: CT_FINISH_OUTPUT
+      PUBLIC  :: SETUP_CT_OCFL_OUT
 !
 ! !PRIVATE MEMBER FUNCTIONS:
 !
@@ -177,6 +178,8 @@
       ! Input/output file names
       CHARACTER(LEN=255)             :: INFILENAME,  INF1, INF2,INF3
       CHARACTER(LEN=255)             :: OUTFILENAME,OUTF1,OUTF2,OUTF3
+      CHARACTER(LEN=255), PUBLIC     :: OCEANFILENAME
+      CHARACTER(LEN=255)             :: OUTF
 
       ! Logical unit numbers (formerly in file_mod.F)
       INTEGER                        :: IU_FILE
@@ -263,11 +266,6 @@
       INTEGER            :: DAYAHEAD(2), DAYBEHIND(2)
       INTEGER            :: TEST
 
-!     INTEGER*8, dimension(:), allocatable :: ID
-      CHARACTER, dimension(:,:), allocatable :: ID
-      REAL*8, dimension(:), allocatable :: XCO2_OBS,XCO2_UNCERT
-      REAL*8, dimension(:), allocatable :: XCO2PBL_OBS,XCO2PBL_UNCERT
-      REAL*8, dimension(:), allocatable :: XCO2FT_OBS,XCO2FT_UNCERT
       CHARACTER(LEN=7)   :: NAMES
       CHARACTER(LEN=20)  :: LINE
       CHARACTER(LEN=10)  :: TYPE
@@ -323,23 +321,6 @@
        PRINT *,'INF1:',INF1
        PRINT *,'INF2:',INF2
        PRINT *,'INF3:',INF3
-
-       ! If we can't find a flighttrack file for today's date, return
-       !IF ((.not. FILE_EXISTS( INF )).and.(.not.FILE_EXISTS(INF2))) THEN 
-       !   DO_CT = .FALSE.
-       !   RETURN
-       !ELSE IF(.not.FILE_EXISTS( INF ).and. FILE_EXISTS( INF2 ) ) THEN
-       !   CALL READ_CT_NC( trim(INF2) , CT_Input_2 )     
-       !   CALL READ_POINTS( am_I_Root, CT_Input_2 )
-       !ELSE IF ( FILE_EXISTS(INF).and.(.not. FILE_EXISTS(INF2)) ) THEN
-       !   CALL READ_CT_NC( trim(INF) , CT_Input_1 )
-       !   CALL READ_POINTS( am_I_Root, CT_Input_1 )
-       !ELSE IF ( FILE_EXISTS(INF).and. FILE_EXISTS(INF2) ) THEN
-       !   CALL READ_CT_NC( trim(INF) , CT_Input_1 )   
-       !   CALL READ_POINTS( am_I_Root, CT_Input_1 )
-       !   CALL READ_CT_NC( trim(INF2) , CT_Input_2 )
-       !   CALL READ_POINTS( am_I_Root, CT_Input_2 )
-       !END IF
 
        IF ((.not. FILE_EXISTS( INF1 )).and.(.not.FILE_EXISTS(INF2)) 
      &            .and. (.not. FILE_EXISTS(INF3))) THEN
@@ -462,131 +443,6 @@
       ! Fancy output
       WRITE( 6, '(a)' ) REPEAT( '=', 79 )
 
-      !=================================================================
-      ! Open today's plane.log file and write file header
-      !=================================================================
-
-      ! Close previously-opened file
-      !CLOSE( IU_CT )
-
-      ! Open new file
-      !OPEN( IU_CT, FILE=TRIM( OUTF ), STATUS='UNKNOWN', IOSTAT=IOS )
-
-      ! Error check
-      !IF ( IOS /= 0 ) THEN
-      !   CALL IOERROR( IOS, IU_CT, 'setup_CT:1' )
-      !ENDIF
-
-      ! Write header
-      !WRITE( IU_CT, 110 ) 'POINT', 'TYPE', 'YYYYMMDD', 'HHMM',
-      !&  'LAT', 'LON', 'PRESS', 'XCO2', 'ERROR', ( PNAME(I), I=1,NPVAR )
-
-      ! FORMAT string
-      ! Replace 95 by 200 FP
-! 110  FORMAT( A5,X,A5,X,A8,X,A4,X,A7,X,A7,X,A7,X,95(a10,x) )
-! 110  FORMAT( A5,X,A5,X,A8,X,A4,X,A7,X,A7,X,A7,X,A7,X,200(a10,x) )
-
-       ALLOCATE( ID( NPOINTS , 100 ) )
-       ALLOCATE( XCO2_OBS (NPOINTS) )
-       ALLOCATE( XCO2_UNCERT (NPOINTS) )
-       ALLOCATE( XCO2FT_OBS (NPOINTS) )
-       ALLOCATE( XCO2FT_UNCERT (NPOINTS) )
-       ALLOCATE( XCO2PBL_OBS (NPOINTS) )
-       ALLOCATE( XCO2PBL_UNCERT (NPOINTS) )
-
-
-      ! CALL READGOSAT_ID( trim (INF), NPOINTS, ID)
-
-      !CALL Ncop_Rd (NCID, trim(INF))
-
-      !print *,'NPOINTS:',NPOINTS
-
-      !CALL NcRd (ID , NCID, 'obspack_id' , 
-      !&    (/ 1,1 /), (/ 100,NPOINTS /))
-
-      ! CALL NcRd (SAMP_STRATEGY, NCID , 'sampling_strategy',
-      !&  (/ 1 /), (/ NPOINTS /))
-
-      ! PRINT *,'SAMP_STRA VECTOR:',SAMP_STRATEGY
- 
-      !CALL Nccl (NCID)
-
-      !  CALL READGOSAT_REAL4( trim (INF), 'xco2_raw', 'Retrieval',
-      !&  ACOS_XCO2, NPOINTS)
-
-      ! CALL READGOSAT_REAL8( trim (INF), 'value', '',
-      !&  XCO2_OBS, NPOINTS)
-
-      !CALL READGOSAT_REAL8( trim (INF), 'mdm', '',
-      !&  XCO2_UNCERT, NPOINTS)
-
-!       CALL READGOSAT_REAL8( trim (INF), 'xco2freetrop_observed', '',
-!     &  XCO2FT_OBS, NPOINTS)
-
-!      CALL READGOSAT_REAL8( trim (INF), 'xco2freetrop_uncertainty', '',
-!     &  XCO2FT_UNCERT, NPOINTS)
-
-!       CALL READGOSAT_REAL8( trim (INF), 'xco2pbl_observed', '',
-!     &  XCO2PBL_OBS, NPOINTS)
-
-!      CALL READGOSAT_REAL8( trim (INF), 'xco2pbl_uncertainty', '',
-!     &  XCO2PBL_UNCERT, NPOINTS)
-
-      ! CALL READGOSAT_REAL4( trim (INF), 'albedo_2', 'Retrieval',
-      !&  ACOS_UNCERT, NPOINTS)
-
-      ! CALL READGOSAT_REAL4( trim (INF), 'dp_cld', 'Preprocessors',
-      !&  ACOS_UNCERT, NPOINTS)
-
-      ! CALL READGOSAT_REAL4( trim (INF), 's32', 'Retrieval',
-      !&  ACOS_UNCERT, NPOINTS)
-
-      ! CALL READGOSAT_REAL4( trim (INF), 'b1offset', 'Retrieval',
-      !&  ACOS_UNCERT, NPOINTS)
-
-      ! CALL READGOSAT_REAL4( trim (INF), 'gain', 'Sounding',
-      !&  ACOS_UNCERT, NPOINTS)
-
-      ! CALL READGOSAT_REAL4( trim (INF), 'surf_type', 'Retrieval',
-      !&  ACOS_UNCERT, NPOINTS)
-
-      ! CALL READGOSAT_REAL4( trim (INF), 'latitude', 'Retrieval',
-      !&  ACOS_UNCERT, NPOINTS)
-
-      ! CALL READGOSAT_REAL4( trim (INF), 'longitude', 'Retrieval',
-      !&  ACOS_UNCERT, NPOINTS)
-
-      ! CALL ncCTOutputCreate(trim(OUTF),NPOINTS,ID,XCO2_OBS,
-      !&  XCO2_UNCERT,XCO2PBL_OBS,XCO2PBL_UNCERT,XCO2FT_OBS,XCO2FT_UNCERT,
-      !&  "xco2_model","xco2pbl_model",
-      !&    "xco2freetrop_model")
-
-      !CALL ncCTOutputCreate(trim(OUTF),NPOINTS)
-       
-      !print *,'NPOINTS:',NPOINTS
-      !CALL NcWr (ID , ctOutputNCID, 'obspack_id' ,
-      !&    (/ 1,1 /), (/ NPOINTS,100 /))
-
-      !CALL NcWr (XCO2_OBS , ctOutputNCID, 'flask_obs' ,
-      !&    (/ 1,1 /), (/ NPOINTS,1 /))
-
-!      CALL NcWr (NSAMP , ctOutputNCID, 'nsamples' ,
-!     &    (/ 1 /), (/ NPOINTS /))
-
-      !CALL Ncget_Dimlen (NCID, 'obs', NPOINTS)
-
-       DEALLOCATE( ID )
-       !DEALLOCATE( NSAMP )
-       !DEALLOCATE( SAMP_STRATEGY )
-       DEALLOCATE( XCO2_OBS)
-       DEALLOCATE( XCO2_UNCERT)
-       DEALLOCATE( XCO2PBL_OBS)
-       DEALLOCATE( XCO2PBL_UNCERT)
-       DEALLOCATE( XCO2FT_OBS)
-       DEALLOCATE( XCO2FT_UNCERT)
-
-       !CALL ncCTOutputClose
-
       END SUBROUTINE SETUP_CT
 !EOC
 !------------------------------------------------------------------------------
@@ -702,6 +558,194 @@
        CALL WRITE_OUTPUT(OUTF2, CT_Input_2, CT_Output_2, TEST )
 
       END SUBROUTINE CT_FINISH_OUTPUT
+!EOC
+!------------------------------------------------------------------------------
+!          Harvard University Atmospheric Chemistry Modeling Group            !
+!------------------------------------------------------------------------------
+!BOP
+!
+! !IROUTINE: setup_CT
+!
+! !DESCRIPTION: Subroutine SETUP\_CT reads information from the
+!  input file in order to initialize the CT diagnostic.  Also
+!  calls INIT\_CT to allocate and zero module arrays.
+!\\
+!\\
+! !INTERFACE:
+!
+      SUBROUTINE SETUP_CT_OCFL_OUT ( )
+!
+! !USES:
+!
+      USE FILE_MOD,   ONLY : FILE_EXISTS
+      USE FILE_MOD,   ONLY : IOERROR
+      !USE FILE_MOD,   ONLY : IU_FILE
+      USE TIME_MOD,   ONLY : EXPAND_DATE
+      USE TIME_MOD,   ONLY : GET_NYMD
+      USE TIME_MOD,   ONLY : GET_NHMS
+      USE TIME_MOD,   ONLY : GET_TIME_AHEAD
+      USE TRACER_MOD, ONLY : ITS_A_FULLCHEM_SIM
+      USE CTFORMAT, ONLY :ncCTOutputCreate,ncCTOutputClose
+      USE CTFORMAT, ONLY : ctOutputNCID
+      !USE NCCOOARDSFORMAT, ONLY :readGOSATlength
+      !USE NCCOOARDSFORMAT, ONLY :READGOSAT_ID,READGOSAT_REAL8
+      USE GIGC_In_Carbontracker_Mod
+      USE CT_INPUT_READ_MOD
+      USE CMN_SIZE_MOD
+
+      ! References to F90 modules
+      USE netcdf
+      USE TRACER_MOD, ONLY : N_TRACERS
+      USE GIGC_In_Carbontracker_Mod
+      USE m_netcdf_io_open
+      USE m_netcdf_io_close
+      USE m_netcdf_io_read
+      USE m_netcdf_io_write
+      USE m_netcdf_io_get_dimlen
+      USE m_do_err_out
+      USE m_netcdf_io_create
+      USE m_netcdf_io_define
+!
+! !INPUT PARAMETERS:
+!
+      !LOGICAL, INTENT(IN) :: am_I_Root   ! Is this the root CPU?
+
+! !REMARKS:
+!  For SMVGEAR or KPP simulations, the call to SETUP_CT is made from
+!  routine "chemdr.f", after the "chem.dat" file is read.  This is necessary
+!  since we have to reference the SMVGEAR rxn rate and species numbers.
+!                                                                             .
+!  For offline simulations, the call to SETUP_CT can be made
+!  at the start of the GEOS-Chem run (in "ndxx_setup.f" or similar routine).
+!
+! !REVISION HISTORY:
+!  30 Jul 2002 - M. Evans    - Initial version
+!  (1 ) Rename from "plane.dat" to "plane.log", since "*.dat" implies an input
+!        file name. (bmy, 8/8/03)
+!  (2 ) Add fancy output string (bmy, 4/26/04)
+!  (3 ) Now references GET_NYMD, GET_NHMS, and EXPAND_DATE from "time_mod.f".
+!        Now also replaces date & time tokens in the filenames. (bmy, 7/20/04)
+!  (4 ) Now references FILE_EXISTS from "file_mod.f".  Modified so that we
+!        check if a flight track file exists on each day.  Open file for
+!        output on each day and write header. (bmy, 3/25/05)
+!  29 Jul 2011 - R. Yantosca - Added ProTeX headers
+!EOP
+!------------------------------------------------------------------------------
+!BOC
+!
+! !LOCAL VARIABLES:
+!
+      ! Local Variables
+      integer                               :: NCID, DIM_LEN
+      integer,  dimension(:), allocatable   :: SAMPLE_STRATEGY
+
+      ! For netCDF file I/O
+      INTEGER             :: idTime,    idLat,   idLon
+      INTEGER             :: fId
+      INTEGER             ::  vId,     omode,   i
+      INTEGER             :: var1(3)
+
+
+      LOGICAL, SAVE      :: FIRST = .TRUE.
+      LOGICAL            :: IS_OPEN
+      INTEGER            :: IP,      N,   TEMP, LENGTH
+      INTEGER            :: RN, COUNTER, IOS, NYMD, NHMS
+      INTEGER            :: DAYAHEAD(2), DAYBEHIND(2)
+      INTEGER            :: TEST
+
+      !=================================================================
+      ! SETUP_CT begins here!
+      !=================================================================
+
+      ! Get date & time
+      NYMD  = GET_NYMD()
+      NHMS  = GET_NHMS()
+
+      !DAYBEHIND = GET_TIME_AHEAD(-1440 )
+      !DAYAHEAD = GET_TIME_AHEAD(1440 )
+
+      ! Copy file names to local variables
+      OUTF = OCEANFILENAME
+
+      ! Replace any date & time tokens in the file names
+      CALL EXPAND_DATE( OUTF,  NYMD, NHMS )
+
+       PRINT *,'OCEAN OUTF:',OUTF
+
+      !=========================================================================
+      ! Create the netCDF file
+      !=========================================================================
+
+      ! Echo info
+      WRITE( 6, '(a)' ) '=== Begin netCDF file creation test ==='
+      CALL NcCr_Wr( fId, TRIM(OUTF) )
+
+      ! Turn filling off
+      !CALL NcSetFill( fId, NF_NOFILL, omode )
+
+      !=========================================================================
+      ! Define the dimensions
+      !=========================================================================
+
+      ! Time dimension
+      WRITE( 6, '(a)' ) 'Writing obs  (dim     ) to netCDF file'
+      CALL NcDef_Dimension( fId, 'time',   8,  idTime )
+      !CALL NcDef_Unlim_Dimension( fId, 'obs',idObs)
+
+      ! Latitude dimension
+      CALL NcDef_Dimension( fId, 'lat',  180 , idLat )
+
+      ! Longitude dimension
+      CALL NcDef_Dimension( fId, 'lon', 360,  idLon )
+
+      !=========================================================================
+      ! Define the variables and variable attributes
+      ! for COARDS compliance and GAMAP compliance
+      !=========================================================================
+      CALL NcDef_Glob_Attributes( fId, 'Title',       'NcdfUtilities' )
+      CALL NcDef_Glob_Attributes( fId, 'History',     '24 Jan 2011'   )
+      CALL NcDef_Glob_Attributes( fId, 'Conventions', 'COARDS'        )
+      CALL NcDef_Glob_Attributes( fId, 'Model',       'GEOS4'         )
+      CALL NcDef_Glob_Attributes( fId, 'Nlayers',     '55'            )
+      CALL NcDef_Glob_Attributes( fId, 'Start_Date',  '20110101'      )
+      CALL NcDef_Glob_Attributes( fId, 'Start_Time',  '00:00:00.0'    )
+      CALL NcDef_Glob_Attributes( fId, 'End_Date',    '20110101'      )
+      CALL NcDef_Glob_Attributes( fId, 'End_Time',    '23:59:59.0'    )
+      CALL NcDef_Glob_Attributes( fId, 'Delta_Lon',   '5'             )
+      CALL NcDef_Glob_Attributes( fId, 'Delta_Lat',   '4'             )
+      CALL NcDef_Glob_Attributes( fId, 'Delta_time',  '000000'        )
+      CALL NcDef_Glob_Attributes( fId, 'Format',      'netCDF-3'      )
+      CALL NcDef_Glob_Attributes( fId,'valid_range',(/-1e15,+1e15 /)  )
+
+      !=========================================================================
+      ! Define the variables and variable attributes
+      !=========================================================================
+
+      ! Time index array (hardwire date to 2011/01/01)
+      vId     = -1
+
+      ! Define obspack_id variable
+      !vId  = vId + 1
+      var1 = (/ idLon, idLat, idTime /)
+      CALL NcDef_Variable( fId, 'ocean_flux', NF90_DOUBLE, 3, var1, vId)
+      !CALL NcDef_Var_Attributes( fId, vId, 'long_name', 'ObsPack ID' )
+      !CALL NcDef_Var_Attributes( fId, vId, 'units',     'hPa'      )
+
+      !=========================================================================
+      ! %%% END OF DEFINITION SECTION %%%
+      ! %%% NOW WRITE DATA TO FILE    %%%
+      !=========================================================================
+      CALL NcEnd_def( fId )
+
+      !=========================================================================
+      ! Close the netCDF file
+      !=========================================================================
+      CALL NcCl( fId )
+
+      ! Echo info
+      WRITE( 6, '(a)' ) '===End oceanflux netCDF file creation test ==='
+
+      END SUBROUTINE SETUP_CT_OCFL_OUT
 !EOC
 !------------------------------------------------------------------------------
 !          Harvard University Atmospheric Chemistry Modeling Group            !
@@ -2227,7 +2271,7 @@
              P_FLASK(M,TRACERIND) = (P_FLASK(M,TRACERIND)*P_NSAMPLES(M) 
      &             + 10**6 *STT(I,J,L,TRACERIND)*TCVV(TRACERIND)/
      &               State_Met%AD(I,J,L) ) / ( P_NSAMPLES(M) +1 )
-             PRINT *,'FLASKFLASK:',P_FLASK(M,TRACERIND)
+             !PRINT *,'FLASKFLASK:',P_FLASK(M,TRACERIND)
            ENDDO
                      !PRINT  *,'done w/ tracers'
                      P_U(M)   = (MET_U(I,J,L) + P_U(M)*P_NSAMPLES(M))
@@ -2692,13 +2736,14 @@
 !\\
 ! !INTERFACE:
 !
-      SUBROUTINE SET_CT( CT, IN_FILE, OUT_FILE )
+      SUBROUTINE SET_CT( CT, IN_FILE, OUT_FILE, OCEAN_FILE )
 !
 ! !INPUT PARAMETERS: 
 !
       LOGICAL,            INTENT(IN) :: CT         ! Turn on CT diag?
       CHARACTER(LEN=255), INTENT(IN) :: IN_FILE    ! Input file to read
       CHARACTER(LEN=255), INTENT(IN) :: OUT_FILE   ! Output file to write
+      CHARACTER(LEN=255), INTENT(IN) :: OCEAN_FILE   ! Another output file to write
 ! 
 ! !REVISION HISTORY: 
 !  20 Jul 2004 - R. Yantosca - Initial version
@@ -2711,6 +2756,7 @@
       DO_CT       = CT
       INFILENAME  = TRIM( IN_FILE  )
       OUTFILENAME = TRIM( OUT_FILE )
+      OCEANFILENAME = TRIM(OCEAN_FILE)
 
       END SUBROUTINE SET_CT
 !EOC
@@ -3032,7 +3078,7 @@
        !PRINT *,'partZ2:',Z(N)
       ENDDO
 
-      Z2(N) = 0
+      Z2 = 0
 
       DO N=1, NLVL
         Z2(N) = SUM(Z(NLVL-N+1:NLVL)) 

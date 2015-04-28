@@ -67,6 +67,10 @@
       PUBLIC :: DO_REGRID_G2G_1x1
       PUBLIC :: DO_REGRID_05x0666
 
+      !-- ... making INIT PUBLIC, not sure AES
+      PUBLIC :: INIT_REGRID_1x1
+      PUBLIC :: RETURN_A_GEN_1x1
+
       !=================================================================
       ! MODULE VARIABLES 
       !=================================================================
@@ -987,7 +991,20 @@
       ! Return to calling program
       END SUBROUTINE REGRID_05x0666_NESTED
          
-      
+!------------------------------------------------------------------------------
+
+      FUNCTION RETURN_A_GEN_1x1 ( J ) RESULT( A_GEN_1x1_AREAS )
+!
+      USE CMN_SIZE_MOD  ! Size parameters
+
+      INTEGER, INTENT(IN)   :: J
+      REAL*8    :: A_GEN_1x1_AREAS
+
+      A_GEN_1x1_AREAS = A_GEN_1x1(J)
+
+      ! Return to calling program
+      END FUNCTION RETURN_A_GEN_1x1
+
 !------------------------------------------------------------------------------
 
       FUNCTION ITS_CONCENTRATION_DATA( UNIT ) RESULT( IS_CONC )

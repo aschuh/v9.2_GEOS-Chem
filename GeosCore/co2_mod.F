@@ -192,6 +192,7 @@
       USE TIME_MOD,           ONLY : GET_TS_EMIS 
       USE TIME_MOD,           ONLY : ITS_A_NEW_DAY, ITS_A_NEW_MONTH
       USE TRACERID_MOD,       ONLY : IDBCO2
+      USE REGRID_1x1_MOD,     ONLY : INIT_REGRID_1x1,CLEANUP_REGRID_1x1
 !
 ! !INPUT PARAMETERS:
 !
@@ -331,6 +332,9 @@
          ! Allocate arrays and read annual-mean data
          CALL INIT_CO2( am_I_Root, Input_Opt, RC )
 
+         !-- Need access to 1x1 generic grid for CT
+         CALL INIT_REGRID_1x1() 
+
          ! Set up tagged regions for balanced biosphere & ocean
          IF ( LBIOSPHTAG ) THEN
             CALL DEF_BIOSPH_CO2_REGIONS_F( BIOSPH_REGION )
@@ -414,7 +418,8 @@
 
          ! ... then use 3-hourly NEP emissions for Bal Bio ...
          IF ( MOD( HOUR, 3 ) == 0 ) THEN
-            CALL READ_CT_3HR_FLUX( MONTH, DAY, HOUR )
+            CALL READ_CT_3HR_FLUX(State_Met,State_Chm,MONTH,
+     &           DAY, HOUR)
          ENDIF
       ENDIF
 
@@ -3280,20 +3285,31 @@
 !\\
 ! !INTERFACE:
 !
-      SUBROUTINE READ_CT_3HR_FLUX( MONTH, DAY, HOUR )
+      SUBROUTINE READ_CT_3HR_FLUX( State_Met,State_Chm,MONTH,DAY,HOUR )
 !
 ! !USES:
 !
+      USE FILE_MOD,         ONLY : FILE_EXISTS
       USE NCCOOARDSFORMAT,  ONLY : readVar2D, readensVar2D
       USE DIRECTORY_MOD,    ONLY : CT_FLUX_DIR
       USE TRANSFER_MOD,     ONLY : TRANSFER_2D
       USE TIME_MOD,         ONLY : GET_YEAR, ITS_A_LEAPYEAR, GET_NYMDb
+      USE TIME_MOD,         ONLY : GET_NYMD, GET_NHMS, EXPAND_DATE
       USE TIME_MOD,         ONLY : GET_ELAPSED_MIN, YMD_EXTRACT
       USE ENKF_MOD,         ONLY : LLAG, LBIAS, BIASFILE, ENUMBER
       USE ENKF_MOD,         ONLY : CYCLE_LEN, LAG_NUM, BIASFILEIN, RERUN
       USE REGRID_1x1_MOD,   ONLY : DO_REGRID_G2G_1x1, DO_REGRID_1x1
       USE CMN_SIZE_MOD      ! Size parameters
       USE CT_INPUT_READ_MOD, ONLY : READ_SCALING_NC
+      USE emission_co2_ocean, ONLY : emission_co2_ocean_calc
+      USE ct_go_print_mod,    ONLY : co2_ocn
+      USE ct_go_print_mod, ONLY : enkf_parms
+      USE GIGC_State_Chm_Mod, ONLY : ChmState
+      USE GIGC_State_Met_Mod, ONLY : MetState
+      USE CT_MOD,             ONLY : OCEANFILENAME,SETUP_CT_OCFL_OUT
+      USE m_netcdf_io_open
+      USE m_netcdf_io_close
+      USE m_netcdf_io_write
 !
 ! !INPUT PARAMETERS:
 !
@@ -3315,13 +3331,15 @@
 !
 ! !LOCAL VARIABLES:
 !
+      INTEGER                :: NCID
       INTEGER                :: YEAR,YYYY,MM,DD,NYMDb,XDAY
+      INTEGER                :: NYMD, NHMS
       INTEGER                :: LAG_NUM_NEW
       INTEGER                :: I,J,STATUS
 !      REAL*4                 :: FLX_ARRAY(IIPAR,JJPAR,1)
       REAL*4                 :: FLX_ARRAY(360,180,1)
       REAL*4                 :: XREAL
-      CHARACTER(LEN=255)     :: FLUX_FILENAME
+      CHARACTER(LEN=255)     :: FLUX_FILENAME,FLUX_FILENAME_OPT, OCEANF
       CHARACTER(LEN=255)     :: CURRENT_BIASFILE
       CHARACTER(LEN=4)       :: CYEAR, YYYY_STR
       CHARACTER(LEN=2)       :: CMONTH, MM_STR,DD_STR
@@ -3330,6 +3348,12 @@
       REAL*8             :: GEOS_GRID(IIPAR,JJPAR,1)
       REAL*4               :: SCALING_FACTOR(360,180,1)
 
+      logical                       :: flux_updated
+
+      TYPE(MetState), INTENT(IN)    :: State_Met   ! Meteorology State object
+      TYPE(ChmState), INTENT(INOUT) :: State_Chm   ! Chemistry State object
+
+      TYPE(enkf_parms),dimension(1)   :: parms
       !=================================================================
       ! IF LAT==TRUE THEN PULL SCALING FACTORS
       !=================================================================
@@ -3366,7 +3390,7 @@
         WRITE( DD_STR,   '(i2.2)' ) DD
 #endif
 
-        CURRENT_BIASFILE = TRIM(BIASFILEIN)//YYYY_STR//'-'//MM_STR
+       CURRENT_BIASFILE = TRIM(BIASFILEIN)//YYYY_STR//'-'//MM_STR
      &       //'-'//DD_STR//'.nc'
 
       !-- IF RERUN THAN PULL LAG=1, otherwise use LAG_NUM_NEW
@@ -3394,6 +3418,10 @@
       !&                'NEE.2x2.5.'       //
      &                CYEAR // CMONTH // '.nc'
 
+      FLUX_FILENAME_OPT = '/discover/nobackup/aschuh/data/ct2013b'//
+     &  '_opt_orig/1x1_TM5met_CT_b2ocfmf/component_fluxes/CT2013B.'
+     &  //'flux1x1.'//CYEAR // CMONTH // '.nc'
+
       ! Echo file name to stdout
       WRITE( 6, 100 ) TRIM( FLUX_FILENAME )
  100  FORMAT( '     - READ_CT_3HR_FLUX: Reading ', a )
@@ -3414,10 +3442,12 @@
 !    &                  JJPAR, (DAY-1)*24+HOUR+1,AARRAY(:,:,1))
 
       IF ( ( MONTH .EQ. 2 ) .AND. ( DAY .EQ. 29 ) ) THEN
-          CALL readVar2D(TRIM(FLUX_FILENAME),'bio_flux_opt',
+!          CALL readVar2D(TRIM(FLUX_FILENAME),'bio_flux_opt',
+          CALL readVar2D(TRIM(FLUX_FILENAME),'NEE',
      &      360,180, (DAY-2)*8+HOUR/3+1,FLX_ARRAY(:,:,1))
       ELSE
-          CALL readVar2D(TRIM(FLUX_FILENAME),'bio_flux_opt',
+!          CALL readVar2D(TRIM(FLUX_FILENAME),'bio_flux_opt',
+          CALL readVar2D(TRIM(FLUX_FILENAME),'NEE',
      &      360,180, (DAY-1)*8+HOUR/3+1,FLX_ARRAY(:,:,1))
       ENDIF
       
@@ -3461,7 +3491,7 @@
       !-- Then convert molC to molecules C via Avos #
       !RARRAY = ( 10.**-4. * 6.0221415*10.**23. ) * RARRAY
 
-      !print *,'max flux:',MAXVAL(FLX_ARRAY)
+      print *,'max bio flux (molc/m2/sec):',MAXVAL(GEOS_GRID)
       !print *,'min flux:',MINVAL(FLX_ARRAY)
 
       EMBIOCO2 = GEOS_GRID(:,:,1) * 6.022142e+19_8
@@ -3484,10 +3514,10 @@
       !---------------------------
 
       IF ( ( MONTH .EQ. 2 ) .AND. ( DAY .EQ. 29 ) ) THEN
-          CALL readVar2D(TRIM(FLUX_FILENAME),'fossil_flux_imp',
+          CALL readVar2D(TRIM(FLUX_FILENAME_OPT),'fossil_flux_imp',
      &      360,180, (DAY-2)*8+HOUR/3+1,FLX_ARRAY(:,:,1))
       ELSE
-          CALL readVar2D(TRIM(FLUX_FILENAME),'fossil_flux_imp',
+          CALL readVar2D(TRIM(FLUX_FILENAME_OPT),'fossil_flux_imp',
      &      360,180, (DAY-1)*8+HOUR/3+1,FLX_ARRAY(:,:,1))
       ENDIF
 
@@ -3533,10 +3563,10 @@
       !---------------------------
 
       IF ( ( MONTH .EQ. 2 ) .AND. ( DAY .EQ. 29 ) ) THEN
-          CALL readVar2D(TRIM(FLUX_FILENAME),'fire_flux_imp',
+          CALL readVar2D(TRIM(FLUX_FILENAME_OPT),'fire_flux_imp',
      &      360,180, (DAY-2)*8+HOUR/3+1,FLX_ARRAY(:,:,1))
       ELSE
-          CALL readVar2D(TRIM(FLUX_FILENAME),'fire_flux_imp',
+          CALL readVar2D(TRIM(FLUX_FILENAME_OPT),'fire_flux_imp',
      &      360,180, (DAY-1)*8+HOUR/3+1,FLX_ARRAY(:,:,1))
       ENDIF
 
@@ -3577,22 +3607,28 @@
       !-- Reading ocean fuels
       !---------------------------
 
-      !IF ( ( MONTH .EQ. 2 ) .AND. ( DAY .EQ. 29 ) ) THEN
-      !    CALL readVar2D(TRIM(FLUX_FILENAME),'ocn_flux_opt',
+      ! IF ( ( MONTH .EQ. 2 ) .AND. ( DAY .EQ. 29 ) ) THEN
+      !     CALL readVar2D(TRIM(FLUX_FILENAME),'ocn_flux_opt',
       !&      360,180, (DAY-2)*8+HOUR/3+1,FLX_ARRAY(:,:,1))
-      !ELSE
-      !    CALL readVar2D(TRIM(FLUX_FILENAME),'ocn_flux_opt',
+      ! ELSE
+      !     CALL readVar2D(TRIM(FLUX_FILENAME),'ocn_flux_opt',
       !&      360,180, (DAY-1)*8+HOUR/3+1,FLX_ARRAY(:,:,1))
-      !ENDIF
+      ! ENDIF
 
-      GEN_1x1(:,:,1) = FLX_ARRAY(:,:,1)
+      parms(1)%surf = SCALING_FACTOR(:,:,1)
+
+      CALL emission_co2_ocean_calc(State_Met, State_Chm,parms,co2_ocn,
+     &     flux_updated,status)
+
+      !GEN_1x1(:,:,1) = FLX_ARRAY(:,:,1)
+      GEN_1x1(:,:,1) = co2_ocn(1)%surf
 
       ! Cast to REAL*8 before regridding
-      DO I=1,360
-        DO J=1,180
-             GEN_1x1(I,J,1) = REAL(FLX_ARRAY(I,J,1),8)
-        END DO
-      END DO
+      !DO I=1,360
+      !  DO J=1,180
+      !       GEN_1x1(I,J,1) = REAL(FLX_ARRAY(I,J,1),8)
+      !  END DO
+      !END DO
 
       ! Regrid from GENERIC 1x1 --> GEOS 1x1
       CALL DO_REGRID_G2G_1x1( 'molec/m2/s', GEN_1x1, GEOS_1x1 )
@@ -3600,17 +3636,36 @@
       ! Regrid from GEOS 1x1 --> current model resolution
       CALL DO_REGRID_1x1( 1, 'molec/m2/s', GEOS_1x1, GEOS_GRID)
 
-      !print *,'max flux:',MAXVAL(FLX_ARRAY)
-      !print *,'min flux:',MINVAL(FLX_ARRAY)
+      !print *,'max flux:',MAXVAL(GEOS_GRID)
+      !print *,'min flux:',MINVAL(GEOS_GRID)
 
-      EMOCCO2 = GEOS_GRID(:,:,1) * 6.022142e+19
+      !--  Writing out ocean fluxes
+      IF(ENUMBER .eq. 1) THEN
+         OCEANF = TRIM(OCEANFILENAME)
+         NYMD  = GET_NYMD()
+         NHMS  = GET_NHMS()
+         CALL EXPAND_DATE( OCEANF,  NYMD, NHMS )
+ 
+         IF (.not. FILE_EXISTS ( OCEANF ) ) THEN
+            CALL SETUP_CT_OCFL_OUT( )
+         END IF
+      
+         CALL NcOp_Wr(NCID,OCEANF)
+         CALL Ncwr(GEN_1x1(:,:,1)/SCALING_FACTOR(:,:,1), NCID,
+     &   'ocean_flux',(/ 1,1, (HOUR/3+1) /), (/ 360,180,1 /) )
+         CALL NcCl(NCID)
+      ENDIF
 
-      !print *,'max flx_array flux:',MAXVAL(FLX_ARRAY)*6.02e+19_8
-      !print *,'max gen_1x1 flux:',MAXVAL(GEN_1x1)*6.02e+19_8
-      !print *,'max geos_grid flux:',MAXVAL(GEOS_GRID)*6.02e+19_8
-      !print *,'max embioco2 flux:',MAXVAL(EMOCCO2)
+      !--  same as above but we're converting mol C instead of umol C
+      EMOCCO2 = GEOS_GRID(:,:,1) * 6.022142e+19 
 
-      !print *,'max flux:',MAXVAL(FLX_ARRAY)
+      print *,'max flx_array flux:',MAXVAL(FLX_ARRAY)*6.02e+19_8
+      print *,'max gen_1x1 flux:',MAXVAL(GEN_1x1)*6.02e+19_8
+      print *,'max geos_grid flux:',MAXVAL(GEOS_GRID)*6.02e+19_8
+      print *,'min embioco2 (molc/m2/sec)flux:',MINVAL(GEOS_GRID)
+      print *,'max embioco2 (molc/m2/sec)flux:',MAXVAL(GEOS_GRID)
+
+      print *,'max flux:',MAXVAL(FLX_ARRAY)
 
       !print *,'max flux',maxval(flx_array)
       !print *,'min flux:',minval(flx_array)
@@ -4528,6 +4583,8 @@
       USE GIGC_ErrCode_Mod
       USE GIGC_Input_Opt_Mod, ONLY : OptInput
       USE ERROR_MOD,          ONLY : ALLOC_ERR
+      USE emission_co2_ocean, ONLY : emission_co2_ocean_init 
+
 !
 ! !INPUT PARAMETERS:
 !
@@ -4552,6 +4609,7 @@
       INTEGER          :: AS
 
       ! For values from Input_Opt
+      INTEGER          :: STATUS
       LOGICAL          :: LGENFF,      LANNFF,      LMONFF
       LOGICAL          :: LCHEMCO2,    LBIODAILY,   LBIODIURNAL
       LOGICAL          :: LBIONETORIG, LBIONETCLIM, LOCN1997
@@ -4565,7 +4623,7 @@
 
       ! For values from Input_Opt for new options
 
-      LOGICAL          :: LDOCNMON,LGENFLX,LSIBBIOHOURLY,LODAFF
+      LOGICAL          :: LDOCNMON,LGENFLX,LSIBBIOHOURLY,LODAFF,LCTFLUX
 
       ! External functions     
       REAL*8, EXTERNAL :: BOXVL    ! dbj
@@ -4598,6 +4656,7 @@
       LGENFLX     = Input_Opt%LGENFLX
       LSIBBIOHOURLY = Input_Opt%LSIBBIOHOURLY
       LODAFF      = Input_Opt%LODAFF
+      LCTFLUX     = Input_Opt%LCTFLUX
       LSHIPEDG    = Input_Opt%LSHIPEDG
       LSHIPICO    = Input_Opt%LSHIPICO
       LPLANE      = Input_Opt%LPLANE
@@ -4697,6 +4756,16 @@
          CALL READ_ANNUAL_BIONET_CO2( am_I_Root, Input_Opt, RC )
       ENDIF
 
+      !===============================
+      ! Initialize ocean co2 exchange
+      !===============================
+
+      print *,'LCTFLUX:',LCTFLUX
+
+      IF(LCTFLUX) THEN 
+         CALL emission_co2_ocean_init(status)
+      ENDIF
+
       ! Reset IS_INIT flag
       IS_INIT = .TRUE.
       
@@ -4716,13 +4785,36 @@
 ! !INTERFACE:
 !
       SUBROUTINE CLEANUP_CO2 
-! 
-! !REVISION HISTORY: 
+!
+! !USES:
+!
+      USE emission_co2_ocean, ONLY : emission_co2_ocean_done
+      USE REGRID_1x1_MOD, ONLY : CLEANUP_REGRID_1x1
+!
+! !INPUT PARAMETERS:
+!
+!
+! !OUTPUT PARAMETERS:
+!
+!
+! !REVISION HISTORY:
 !  16 Aug 2005 - P. Suntharalingam   - Initial version
-!  18 May 2010 - R. Nassar, D. Jones - Updated 
+!  18 May 2010 - R. Nassar, D. Jones - Updated
+!  25 Mar 2013 - R. Yantosca - Now use logical fields from Input_Opt
 !EOP
 !------------------------------------------------------------------------------
 !BOC
+!
+! !LOCAL VARIABLES:
+!
+      INTEGER        :: STATUS
+
+      !=========================
+      ! CLEANUP CT FLUX ARRAYS 
+      !=========================
+ 
+      CALL emission_co2_ocean_done(status) 
+
       !=================================================================
       ! CLEANUP_CO2 begins here!
       !=================================================================
@@ -4737,6 +4829,8 @@
       IF ( ALLOCATED( CHEMCO2      ) ) DEALLOCATE( CHEMCO2      )
       IF ( ALLOCATED( EMIS_SUB     ) ) DEALLOCATE( EMIS_SUB     )
 
+      CALL CLEANUP_REGRID_1x1      
+      
       END SUBROUTINE CLEANUP_CO2
 !EOC
       END MODULE CO2_MOD
