@@ -440,7 +440,8 @@ cleanup.o                   : cleanup.F                                      \
                               bravo_mod.o             bromocarb_mod.o        \
                               c2h6_mod.o              cac_anthro_mod.o       \
                               carbon_mod.o            co2_mod.o              \
-                              comode_mod.o            dao_mod.o              \
+                              comode_mod.o            ct_mod.o               \
+                                                      dao_mod.o              \
                               depo_mercury_mod.o      diag_mod.o             \
                               diag03_mod.o            diag04_mod.o           \
                               diag41_mod.o            diag50_mod.o           \
@@ -478,9 +479,10 @@ cldice_HBrHOBr_rxn.o        : cldice_HBrHOBr_rxn.F
 
 CLDSRF.o                    : CLDSRF.F
 
-co2_mod.o                   : co2_mod.F                                      \
+co2_mod.o                   : co2_mod.F               ct_input_read_mod.o    \
                               biomass_mod.o           diag04_mod.o           \
-	                      tracerid_mod.o          enkf_mod.o          
+	                      emission_co2_ocean.o    enkf_mod.o             \
+                              tracerid_mod.o          ct_mod.o               
 
 command_line.o              : enkf_mod.o
 
@@ -492,6 +494,14 @@ convection_mod.o            : convection_mod.F                               \
                               gcap_convect_mod.o      mercury_mod.o          \
                               tracer_mod.o            tracerid_mod.o         \
                               wetscav_mod.o          
+
+ct_go_print_mod.o           : ct_go_print_mod.F90                            
+
+ct_input_read_mod.o         : ct_input_read_mod.F     enkf_mod.o                             
+
+ct_mod.o                    : ct_mod.F                ct_input_read_mod.o    \
+                              comode_mod.o            dao_mod.o              \
+                              tracer_mod.o            tropopause_mod.o       
 
 dao_mod.o                   : dao_mod.F                                      \
                               logical_mod.o
@@ -624,6 +634,9 @@ emissdr.o                   : emissdr.F                                      \
                               rcp_mod.o               soil_nox_mod.o         \
                               tracerid_mod.o
 
+emission_co2_ocean.o        : emission_co2_ocean.F90               \
+                              ct_go_print_mod.o           
+ 
 emissions_mod.o             : emissions_mod.F                                \
                               arctas_ship_emiss_mod.o biomass_mod.o          \
                               bravo_mod.o             c2h6_mod.o             \
@@ -756,7 +769,7 @@ global_oh_mod.o             : global_oh_mod.F                                \
 
 gosat_mod.o                 : gosat_mod.F                                    \
                               comode_mod.o            dao_mod.o              \
-                              tracer_mod.o            tropopause_mod.o
+                              tracer_mod.o            tropopause_mod.o       
 
 h2_hd_mod.o                 : h2_hd_mod.F                                    \
                               biofuel_mod.o           biomass_mod.o          \

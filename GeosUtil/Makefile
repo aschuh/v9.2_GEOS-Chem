@@ -131,6 +131,8 @@ bpch2_mod.o       : bpch2_mod.F                      \
                     error_mod.o         file_mod.o   \
                     julday_mod.o        inquireMod.o
 
+ctFormat_mod.o    : ctFormat.F90
+
 charpak_mod.o     : charpak_mod.F
 
 directory_mod.o   : directory_mod.F
