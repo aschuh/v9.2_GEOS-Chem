@@ -61,7 +61,7 @@ module emission_co2_ocean
   !character(len=1024)		:: GlobalviewFile
   character(len=*), parameter  :: GlobalviewFile='gv11_mbl.nc'
   !character(len=20)		:: Ocean_pco2_air
-  character(len=*), parameter  :: Ocean_pco2_air='globalview'
+  character(len=*), parameter  :: Ocean_pco2_air='interactive'
 
   character(len=*), parameter  :: deltapco2_prefix='notsure'
 
