@@ -84,7 +84,7 @@
       USE ASCENDS_MOD,   ONLY : ASCENDS,SETUP_ASCENDS
       USE CT_MOD,        ONLY : CT,SETUP_CT,CT_FINISH_OUTPUT
       USE CT_MOD,        ONLY : SETUP_CT_OCFL_OUT
-      USE ENKF_MOD,          ONLY : ENUMBER
+      USE ENKF_MOD,          ONLY : ENUMBER,RERUN
       USE NCCOOARDSFORMAT, ONLY: ncStationFileClose
       USE CTFORMAT,      ONLY : ncCTOutputClose
       !-----------------------------------------------------------------
@@ -1574,6 +1574,17 @@
       ! Close all files
       CALL CLOSE_FILES
       IF ( prtDebug ) CALL DEBUG_MSG( '### MAIN: a CLOSE_FILES' )
+
+      print *,'right before'
+      print *,'Input_Opt%TCVV:',Input_Opt%TCVV
+      ! Make atmospheric restart file
+      
+      !-- Make restart file for "reruns"
+      IF(RERUN)  THEN
+             CALL MAKE_RESTART_FILE_CT
+     &            ( am_I_Root, Input_Opt, NYMD,      NHMS,
+     &              TAU,       State_Met, State_Chm, RC    )
+      ENDIF
 
       ! Free pointers (mpayer, 12/6/12)
       NULLIFY( STT, TCVV )

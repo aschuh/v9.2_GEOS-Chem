@@ -25,6 +25,7 @@
 ! !PUBLIC MEMBER FUNCTIONS
 !
       PUBLIC  :: MAKE_RESTART_FILE
+      PUBLIC  :: MAKE_RESTART_FILE_CT
       PUBLIC  :: READ_RESTART_FILE
       PUBLIC  :: READ_RESTART
       PUBLIC  :: SET_RESTART
@@ -36,8 +37,10 @@
       PRIVATE  :: READ_RESTART_FILE_NC
 
       PRIVATE :: CONVERT_TRACER_TO_VV
+      PRIVATE :: CONVERT_TRACER_TO_VV_8
       PRIVATE :: CHECK_DIMENSIONS
       PRIVATE :: COPY_STT
+      PRIVATE :: COPY_STT_8
       PRIVATE :: CHECK_DATA_BLOCKS
 !
 ! !REVISION HISTORY:
@@ -80,6 +83,344 @@
       CHARACTER(LEN=255) :: OUTPUT_RESTART_FILE 
 
       CONTAINS
+!EOC
+!------------------------------------------------------------------------------
+!          Harvard University Atmospheric Chemistry Modeling Group            !
+!------------------------------------------------------------------------------
+!BOP
+!
+! !IROUTINE: make_restart_file
+!
+! !DESCRIPTION: Subroutine MAKE\_RESTART\_FILE creates restart files for
+!  GEOS-Chem advected tracers [units: v/v].  The file format is GEOS-Chem
+!  binary punch (bpch) format.
+!\\
+!\\
+! !INTERFACE:
+!
+      SUBROUTINE MAKE_RESTART_FILE_CT( am_I_Root, Input_Opt,
+     &                              YYYYMMDD,  HHMMSS,
+     &                              TAU,       State_Met,
+     &                              State_Chm, RC )
+!
+! !USES:
+!
+      USE BPCH2_MOD,          ONLY : BPCH2,         GET_MODELNAME
+      USE BPCH2_MOD,          ONLY : GET_HALFPOLAR, OPEN_BPCH2_FOR_WRITE
+      USE CMN_SIZE_MOD
+      USE ERROR_MOD,          ONLY : DEBUG_MSG
+      USE FILE_MOD,           ONLY : IOERROR
+      USE GIGC_ErrCode_Mod
+      USE GIGC_Input_Opt_Mod, ONLY : OptInput
+      USE GIGC_State_Chm_Mod, ONLY : ChmState
+      USE GIGC_State_Met_Mod, ONLY : MetState
+      USE GRID_MOD,           ONLY : GET_XOFFSET,   GET_YOFFSET
+      USE TIME_MOD,           ONLY : EXPAND_DATE
+
+      USE netcdf         
+      USE ncCooardsFormat,   ONLY: nc3dFileCreate, handleerror
+      !-- Needed this for setting time on ncdf4 output
+      USE TIME_MOD,           ONLY : GET_DAY_OF_YEAR, GET_HOUR, GET_YEAR
+      USE GRID_MOD,           ONLY : GET_XMID
+      USE GRID_MOD,           ONLY : GET_YMID
+!
+! !INPUT PARAMETERS:
+!
+      LOGICAL,        INTENT(IN)  :: am_I_Root   ! Are we on the root CPU?
+      TYPE(OptInput), INTENT(IN)  :: Input_Opt   ! Input Options object
+      INTEGER,        INTENT(IN)  :: YYYYMMDD    ! YYYY/MM/DD GMT date
+      INTEGER,        INTENT(IN)  :: HHMMSS      ! hh:mm:ss GMT time
+      REAL*8,         INTENT(IN)  :: TAU         ! TAU value (hrs from 1/1/1985)
+      TYPE(MetState), INTENT(IN)  :: State_Met   ! Meteorology State object
+      TYPE(ChmState), INTENT(IN)  :: State_Chm   ! Chemistry State object
+!
+! !OUTPUT PARAMETERS:
+!
+      INTEGER,        INTENT(OUT) :: RC          ! Success or failure?
+!
+! !REVISION HISTORY:
+!  27 May 1999 - R. Yantosca - Initial version
+!  (1 ) Now use function NYMD_STRING from "time_mod.f" to generate a
+!        Y2K compliant string for all data sets. (bmy, 6/22/00)
+!  (2 ) Reference F90 module "bpch2_mod.f" which contains routines BPCH2_HDR,
+!        BPCH2, and GET_MODELNAME for writing data to binary punch files.
+!        (bmy, 6/22/00)
+!  (3 ) Now do not write more than NTRACE data blocks to disk.
+!        Also updated comments. (bmy, 7/17/00)
+!  (4 ) Now use IOS /= 0 to trap both I/O errors and EOF. (bmy, 9/13/00)
+!  (5 ) Added to "restart_mod.f".  Also now save the entire grid to the
+!        restart file. (bmy, 6/24/02)
+!  (6 ) Bug fix: Remove duplicate definition of MM.  This causes compile-time
+!        problems on the ALPHA platform. (gcc, bmy, 11/6/02)
+!  (7 ) Now references functions GET_OFFSET, GET_YOFFSET from "grid_mod.f".
+!        Now references function GET_TAU from "time_mod.f".  Now added a call
+!        to DEBUG_MSG from "error_mod.f" (bmy, 2/11/03)
+!  (8 ) Cosmetic changes (bmy, 4/29/03)
+!  (9 ) Now reference STT, N_TRACERS, TCVV from "tracer_mod.f".  Also now
+!        remove hardwired output restart filename.   Now references LPRT
+!        from "logical_mod.f". (bmy, 7/20/04)
+!  (10) Remove references to CMN_DIAG and TRCOFFSET.  Now call GET_HALFPOLAR
+!        from "bpch2_mod.f" to get the HALFPOLAR flag value for GEOS or GCAP
+!        grids. (bmy, 6/28/05)
+!  (11) Now make sure all USE statements are USE, ONLY (bmy, 10/3/05)
+!  (12) Add TAU to the argument list (bmy, 12/16/05)
+!  11 Jul 2011 - R. Yantosca - Added ProTeX headers
+!  21 Jul 2011 - M. Long     - Now include F77_CMN_SIZE instead of CMN_SIZE
+!  03 Aug 2012 - R. Yantosca - Move calls to findFreeLUN out of DEVEL block
+!  07 Aug 2012 - R. Yantosca - Now print LUN used to open file
+!  09 Nov 2012 - M. Payer    - Replaced all met field arrays with State_Met
+!                              derived type object
+!  25 Mar 2013 - R. Yantosca - Now accept am_I_Root, Input_Opt, State_Chm, RC
+
+!EOP
+!------------------------------------------------------------------------------
+!BOC
+!
+! !LOCAL VARIABLES:
+!
+      ! Local Variables
+      INTEGER              :: I,    I0, IOS, J,  J0, L, N
+      INTEGER              :: YYYY, MM, DD,  HH, SS
+      REAL*4               :: TRACER(IIPAR,JJPAR,LLPAR)
+      CHARACTER(LEN=255)   :: FILENAME
+
+      ! For binary punch file, version 2.0
+      INTEGER              :: IU_RST
+      REAL*4               :: LONRES, LATRES
+      INTEGER              :: HALFPOLAR
+      INTEGER, PARAMETER   :: CENTER180 = 1
+
+      CHARACTER(LEN=20)  :: ICHARACTER
+      CHARACTER(LEN=20),ALLOCATABLE  :: TRACERNAMES(:)
+      REAL, ALLOCATABLE  :: LATS_NC(:), LONS_NC(:), LEVS_NC(:)
+      REAL, DIMENSION(47) :: lev_meters = (/58,189,320,454,589,726,864,
+     &                        1004,1146,1290,1436,1584,1759,1988,2249,
+     &                        2517,2792,3074,3439,3896,4375,4879,5413,
+     &                        5980,6585,7237,7943,8846,9936,11021,
+     &                        12086,13134,14170,15198,16222,17243,
+     &                        18727,20836,23020,25307,28654,34024,
+     &                        40166,47135,54834,63053,72180/)
+      !-- Added for ncdf4 output
+      INTEGER            :: fNCID,variableID,locallatid,locallonid
+      INTEGER            :: localtimeid,locallevid
+      REAL               :: HOUROUT
+      REAL*8, PARAMETER :: CO2_TO_PPM = 1000000.0
+
+      CHARACTER(LEN=20)    :: MODELNAME
+      CHARACTER(LEN=40)    :: CATEGORY
+      CHARACTER(LEN=40)    :: UNIT
+      CHARACTER(LEN=40)    :: RESERVED = ''
+      CHARACTER(LEN=80)    :: TITLE
+
+      ! For fields from Input_Opt
+      LOGICAL              :: LPRT
+      INTEGER              :: N_TRACERS
+      REAL*8               :: TCVV(Input_Opt%N_TRACERS)
+
+      ! Pointers
+      ! We need to define local arrays to hold corresponding values
+      ! from the Chemistry State (State_Chm) object. (mpayer, 12/6/12)
+      REAL*8, POINTER      :: STT(:,:,:,:)
+
+      !=================================================================
+      ! MAKE_RESTART_FILE begins here!
+      !=================================================================
+
+      print *,'are we here?'
+      flush(6)
+      print *,'h1'
+      ! Assume success
+      RC        =  GIGC_SUCCESS
+      print *,'h1'
+      ! Copy values from Input_Opt
+      LPRT      = Input_Opt%LPRT
+      print *,'g1'
+      N_TRACERS = Input_Opt%N_TRACERS
+      print *,'g1'
+      TCVV      = Input_Opt%TCVV
+      print *,'h1'
+      ! Define variables for BINARY PUNCH FILE OUTPUT
+      TITLE    = 'GEOS-CHEM Restart File: ' //
+     &           'Instantaneous Tracer Concentrations (v/v)'
+      UNIT     = 'v/v'
+      CATEGORY = 'IJ-AVG-$'
+      LONRES   = DISIZE
+      LATRES   = DJSIZE
+       
+      print *,'h1'
+      ! Call GET_MODELNAME to return the proper model name for
+      ! the given met data being used (bmy, 6/22/00)
+      MODELNAME = GET_MODELNAME()
+      print *,'h1'
+      ! Call GET_HALFPOLAR to return the proper value
+      ! for either GCAP or GEOS grids (bmy, 6/28/05)
+      HALFPOLAR = GET_HALFPOLAR()
+      print *,'h1'
+      ! Get the nested-grid offsets
+      I0 = GET_XOFFSET( GLOBAL=.TRUE. )
+      J0 = GET_YOFFSET( GLOBAL=.TRUE. )
+      print *,'h1'
+      ! Initialize GEOS-Chem tracer array [kg] from Chemistry State object
+      ! (mpayer, 12/6/12)
+      STT => State_Chm%Tracers
+      print *,'h1'
+      !=================================================================
+      ! Open the restart file for output -- binary punch format
+      !=================================================================
+
+      ! Find a free file LUN
+      !IU_RST   = findFreeLUN()
+      print *,'h1'
+      ! Copy the output restart file name into a local variable
+      FILENAME = TRIM( OUTPUT_RESTART_FILE )
+      print *,'h1'
+      ! Replace YYYY, MM, DD, HH tokens in FILENAME w/ actual values
+      CALL EXPAND_DATE( FILENAME, YYYYMMDD, HHMMSS )
+      print *,'h1'
+      !WRITE( 6, 100 ) TRIM( FILENAME ), IU_RST
+      WRITE( 6, 100 ) TRIM( FILENAME )
+ 100  FORMAT( '     - MAKE_RESTART_FILE: Writing ', a)
+
+      ! Open restart file for output
+      !CALL OPEN_BPCH2_FOR_WRITE( IU_RST, FILENAME, TITLE )
+
+#if   defined( USE_HDF5 ) || defined( USE_NCDF4 )
+
+      ALLOCATE(TRACERNAMES(N_TRACERS))
+
+        DO I= 1,N_TRACERS
+           !write (ICHARACTER,'(I0)') nd50_tracers(I)
+           write (ICHARACTER,'(I0)') I
+           !PRINT *,'ichar:',ICHARACTER
+           TRACERNAMES(I) = 'Tracer '//ICHARACTER
+           !print *,'tracernames(i):',tracernames(i)
+        ENDDO
+
+        CALL  nc3dFileCreate(trim(FILENAME),
+     &           JJPAR, IIPAR,
+     &           LLPAR, 1, TRACERNAMES,N_TRACERS,
+     &           'PPM', 'hours since 2000-1-1',7)
+        !print *,'NCFILE CREATED FOR:',NHMS
+
+        allocate(LATS_NC(JJPAR))
+        allocate(LONS_NC(IIPAR))
+        allocate(LEVS_NC(LLPAR))
+
+        DO I = 1, (LLPAR)
+          LEVS_NC(I) = lev_meters( I )
+          !LEVS_NC(I) = I
+        ENDDO
+
+        !print *,'levs_nc:',LEVS_NC
+        DO I = 1, (JJPAR)
+          LATS_NC(I) = GET_YMID(1,I,1)
+          IF (I==1) LATS_NC(I)=LATS_NC(I)-0.5
+          IF (I==JJPAR) LATS_NC(I)=LATS_NC(I)+0.5
+        ENDDO
+        !print *,'lats_nc:',lats_nc
+        DO I = 1, (IIPAR)
+          LONS_NC(I) = GET_XMID(I,1,1)
+        ENDDO
+
+        !-- Defining dimension variables
+
+            CALL handleerror(nf90_open(trim(FILENAME),NF90_WRITE,
+     &                        fNCID))
+            !print *,'test0',LATS_NC
+
+            CALL handleerror(nf90_inq_varid(fNCID, 'lat', locallatID))
+            CALL handleerror(nf90_put_var(fNCID,locallatID,LATS_NC))
+            !print *,'test'
+
+            HOUROUT = (GET_DAY_OF_YEAR()+1)*24+(GET_YEAR()-2000)*365*24
+     &            +   GET_HOUR()
+
+            CALL handleerror(nf90_inq_varid(fNCID, 'time', localtimeID))
+            CALL handleerror(nf90_put_var(fNCID,localtimeID,HOUROUT))
+
+            CALL handleerror(nf90_inq_varid(fNCID, 'lon', locallonID))
+            CALL handleerror(nf90_put_var(fNCID,locallonID,LONS_NC))
+
+            CALL handleerror(nf90_inq_varid(fNCID,'Levels',locallevID))
+            CALL handleerror(nf90_put_var(fNCID,locallevID,LEVS_NC))
+
+            CALL handleError(nf90_close(fNCID))
+
+#endif
+
+      !=================================================================
+      ! Write each tracer to the restart file
+      !=================================================================
+      DO N = 1, N_TRACERS
+
+         ! Convert from [kg] to [v/v] and store in the TRACER array
+!$OMP PARALLEL DO
+!$OMP+DEFAULT( SHARED )
+!$OMP+PRIVATE( I, J, L )
+         DO L = 1, LLPAR
+         DO J = 1, JJPAR
+         DO I = 1, IIPAR
+            TRACER(I,J,L) = STT(I,J,L,N) * TCVV(N) / State_Met%AD(I,J,L)
+         ENDDO
+         ENDDO
+         ENDDO
+!$OMP END PARALLEL DO
+
+         ! Convert STT from [kg] to [v/v] mixing ratio
+         ! and store in temporary variable TRACER
+         !CALL BPCH2( IU_RST,    MODELNAME, LONRES,    LATRES,
+         !&               HALFPOLAR, CENTER180, CATEGORY,  N,
+         !&               UNIT,      TAU,       TAU,       RESERVED,
+         !&               IIPAR,     JJPAR,     LLPAR,     I0+1,
+         !&               J0+1,      1,         TRACER )
+         !ENDDO
+
+         ! Close file
+         !CLOSE( IU_RST )
+
+#if   defined( USE_NCDF4 )
+
+            CALL handleerror(nf90_open(trim(FILENAME),NF90_WRITE,
+     &                        fNCID))
+
+       !print *,'looking for :',tracernames(W)
+
+       CALL handleerror(nf90_inq_varid(fNCID, TRACERNAMES(N),
+     &                         variableID))
+      !PRINT *,'shape(Q):',shape(REAL(Q(1:ND50_NI,1:ND50_NJ,1:GMNL,W),4))
+      !PRINT *,'W:',W,' varid:',variableID,' Q min/max:',
+      !&    minval(CO2_TO_PPM*REAL(Q(1:ND50_NI,1:ND50_NJ,1:GMNL,W),4)),' '
+      !&   ,maxval(CO2_TO_PPM*REAL(Q(1:ND50_NI,1:ND50_NJ,1:GMNL,W),4))
+      !PRINT *,'Q[100,50,45,1]:',Q(100,50,45,1)
+!      PRINT *,'Q[100,50,45,4]:',Q(100,50,45,4)
+
+      !CALL handleerror(nf90_put_var(ncid=fNCID, varid=variableID,
+      !&  values=REAL(CO2_TO_PPM*Q(1:ND50_NI, 1:ND50_NJ, 1:GMNL, W),4)))
+
+      CALL handleerror(nf90_put_var(ncid=fNCID, varid=variableID,
+     &  values=CO2_TO_PPM*TRACER(1:IIPAR, 1:JJPAR, 1:LLPAR)))
+
+      print *,'writing to file, Tracer ',N,' TRACER: 40,30,1:47:',
+     &     TRACER(40, 30, 1:LLPAR)
+
+      ENDDO
+       !print *,'closing netcdf....'
+       CALL  handleError(nf90_close(fNCID))
+
+      deallocate(LATS_NC)
+      deallocate(LONS_NC)
+      deallocate(LEVS_NC)
+
+      DEALLOCATE(TRACERNAMES)
+#endif
+
+      ! Free pointer
+      NULLIFY( STT )
+
+      !### Debug
+      IF ( LPRT ) CALL DEBUG_MSG( '### MAKE_RESTART_FILE_CT:wrote file')
+
+      END SUBROUTINE MAKE_RESTART_FILE_CT
 !EOC
 !------------------------------------------------------------------------------
 !          Harvard University Atmospheric Chemistry Modeling Group            !
@@ -326,7 +667,7 @@
 !BOC
 !------------------------------------------------------------------------------
 
-      print *,'type:',TRIM(INPUT_RESTART_FILE_TYPE)
+      !print *,'type:',TRIM(INPUT_RESTART_FILE_TYPE)
       IF ((TRIM(INPUT_RESTART_FILE_TYPE ) .ne. 'NC') .and.
      &     (TRIM(INPUT_RESTART_FILE_TYPE ) .ne. 'BPCH')) THEN
            CALL ERROR_STOP('READ_RESTART_FILE_TYPE must be a netcdf
@@ -667,7 +1008,7 @@
       INTEGER             :: I, IOS, J, L, N
       INTEGER             :: NCOUNT(NNPAR)
       !REAL*4               :: TRACER(IIPAR,JJPAR,LLPAR)
-      REAL*4, ALLOCATABLE :: TRACER(:,:,:)
+      REAL*8, ALLOCATABLE :: TRACER(:,:,:)
       REAL*8              :: SUMTC
       CHARACTER(LEN=255)  :: FILENAME
 
@@ -722,7 +1063,7 @@
       ! Open the binary punch file for input
       !CALL OPEN_BPCH2_FOR_READ( IU_RST, FILENAME )
 
-      print *, 'read nc4 input ', FILENAME
+      !print *, 'read nc4 input ', FILENAME
       !-- Open netcdf file
       status = nf90_open(FILENAME, nf90_nowrite, ncid) ! Open dataset
       if (status /= nf90_noerr) then
@@ -869,10 +1210,10 @@
             ! Convert TRACER from its native units to [v/v] mixing ratio
             !CALL CONVERT_TRACER_TO_VV( NTRACER, TRACER, UNIT )
             !-- AESchuh, need to look at why units don't match
-            CALL CONVERT_TRACER_TO_VV( NTRACER, TRACER, units)
+            CALL CONVERT_TRACER_TO_VV_8( NTRACER, TRACER, units)
 
             ! Convert TRACER from [v/v] to [kg] and copy into STT array
-            CALL COPY_STT( NTRACER, TRACER, NCOUNT,
+            CALL COPY_STT_8( NTRACER, TRACER, NCOUNT,
      &                  Input_Opt, State_Met, State_Chm )
 
           !-**ENDIF
@@ -1038,6 +1379,87 @@
 !------------------------------------------------------------------------------
 !BOP
 !
+! !IROUTINE: convert_tracer_to_vv
+!
+! !DESCRIPTION: Subroutine CONVERT\_TRACER\_TO\_VV converts the TRACER array
+!  from its natural units (e.g. ppbv, ppmv) as read from the restart file to
+!  v/v mixing ratio.
+!\\
+!\\
+! !INTERFACE:
+!
+      SUBROUTINE CONVERT_TRACER_TO_VV_8( NTRACER, TRACER, UNIT )
+!
+! !USES:
+!
+      USE CHARPAK_MOD, ONLY : TRANUC
+      USE ERROR_MOD,   ONLY : GEOS_CHEM_STOP
+
+      USE CMN_SIZE_MOD      ! Size parameters
+!
+! !INPUT PARAMETERS:
+!
+      ! Tracer number and units
+      INTEGER,          INTENT(IN) :: NTRACER
+      CHARACTER(LEN=*), INTENT(IN) :: UNIT
+!
+! !INPUT/OUTPUT PARAMETERS:
+!
+      ! Array containing tracer concentrations
+      REAL*8,        INTENT(INOUT) :: TRACER(IIPAR,JJPAR,LLPAR)
+!
+! !REVISION HISTORY:
+!  (1 ) Added to "restart_mod.f".  Can now also convert from ppm or ppmv
+!        to v/v mixing ratio. (bmy, 6/25/02)
+!  (2 ) Now reference GEOS_CHEM_STOP from "error_mod.f", which frees all
+!        allocated memory before stopping the run. (bmy, 10/15/02)
+!  (3 ) Remove obsolete reference to CMN (bmy, 6/24/05)
+!  11 Jul 2011 - R. Yantosca - Added ProTeX headers
+!  21 Jul 2011 - M. Long     - Now include F77_CMN_SIZE instead of CMN_SIZE
+!EOP
+!------------------------------------------------------------------------------
+!BOC
+      !=================================================================
+      ! CONVERT_TRACER_TO_VV begins here!
+      !=================================================================
+
+      ! Convert UNIT to uppercase
+      CALL TRANUC( UNIT )
+
+      ! Convert from the current unit to v/v
+      SELECT CASE ( TRIM( UNIT ) )
+
+         CASE ( '', 'V/V' )
+            ! Do nothing, TRACER is already in v/v
+
+         CASE ( 'PPM', 'PPMV', 'PPMC' )
+            TRACER = TRACER * 1d-6
+
+         CASE ( 'PPB', 'PPBV', 'PPBC' )
+            TRACER = TRACER * 1d-9
+
+         CASE ( 'PPT', 'PPTV', 'PPTC' )
+            TRACER = TRACER * 1d-12
+
+         CASE DEFAULT
+            WRITE( 6, '(a)' ) 'Incompatible units in punch file!'
+            WRITE( 6, '(a)' ) 'STOP in CONVERT_TRACER_TO_VV'
+            WRITE( 6, '(a)' ) REPEAT( '=', 79 )
+            CALL GEOS_CHEM_STOP
+
+      END SELECT
+
+      ! Print the min & max of each tracer as it is read from the file
+      WRITE( 6, 110 ) NTRACER,  MINVAL( TRACER ), MAXVAL( TRACER )
+ 110  FORMAT( 'Tracer ', i3, ': Min = ', es12.5, '  Max = ',  es12.5 )
+
+      END SUBROUTINE CONVERT_TRACER_TO_VV_8
+!EOC
+!------------------------------------------------------------------------------
+!          Harvard University Atmospheric Chemistry Modeling Group            !
+!------------------------------------------------------------------------------
+!BOP
+!
 ! !IROUTINE: check_dimensions
 !
 ! !DESCRIPTION: Subroutine CHECK\_DIMENSIONS makes sure that the dimensions 
@@ -1116,7 +1538,7 @@
 !\\
 ! !INTERFACE:
 !
-      SUBROUTINE COPY_STT( NTRACER,   TRACER,    NCOUNT,
+      SUBROUTINE COPY_STT_8( NTRACER,   TRACER,    NCOUNT,
      &                     Input_Opt, State_Met, State_Chm )
 !
 ! !USES:
@@ -1129,7 +1551,7 @@
 ! !INPUT PARAMETERS: 
 !
       INTEGER,        INTENT(IN)    :: NTRACER                   ! Tracer #
-      REAL*4,         INTENT(IN)    :: TRACER(IIPAR,JJPAR,LLPAR) ! Tracers from 
+      REAL*8,         INTENT(IN)    :: TRACER(IIPAR,JJPAR,LLPAR) ! Tracers from 
                                                                  !rst file [v/v]
       TYPE(OptInput), INTENT(IN)    :: Input_Opt   ! Input Options object
       TYPE(MetState), INTENT(IN)    :: State_Met   ! Meteorology State object
@@ -1179,6 +1601,115 @@
          State_Chm%Tracers(I,J,L,N) = TRACER(I,J,L) 
      &                              * State_Met%AD(I,J,L) 
      &                              / Input_Opt%TCVV(N) 
+
+      IF (I==40 .and. J==30 .and. L==1) THEN
+         PRINT *,'big calc:',TRACER(I,J,L),' * ',State_Met%AD(I,J,L),
+     &  ' / ',Input_Opt%TCVV(N),' = ',State_Chm%Tracers(I,J,L,N)
+      ENDIF
+
+      ENDDO
+      ENDDO
+      ENDDO
+      
+!$OMP END PARALLEL DO
+
+      print *,'reading tracer from file, T=',N,' Q: 40,30,1:47:',
+     &     TRACER(40, 30, 1:47)
+
+      print *,'State_Met%AD, T=',N,' Q: 40,30,1:47:',
+     &     State_Met%AD(40, 30, 1:47)
+
+      print *,'TCVV, T=',N,' Q: 40,30,1:47:',
+     &     Input_Opt%TCVV(N)
+
+      print *,'STT(40,30,1:47):',State_Chm%Tracers(40,30,1:47,N)
+
+      DO L  =  1,SIZE(State_Chm%Tracers,DIM=4)-1
+         print *,L,': Total CO2(kg) from restart:',
+     &     sum(State_Chm%Tracers(:,:,:,l))
+      ENDDO
+
+      ! Increment the # of records found for tracer N
+      NCOUNT(N) = NCOUNT(N) + 1
+
+      END SUBROUTINE COPY_STT_8
+!EOC
+!------------------------------------------------------------------------------
+!          Harvard University Atmospheric Chemistry Modeling Group            !
+!------------------------------------------------------------------------------
+!BOP
+!
+! !IROUTINE: copy_stt
+!
+! !DESCRIPTION: Subroutine COPY\_STT converts tracer concetrations from [v/v]
+!  to [kg] and then copies the results into the STT tracer array.
+!\\
+!\\
+! !INTERFACE:
+!
+      SUBROUTINE COPY_STT( NTRACER,   TRACER,    NCOUNT,
+     &                     Input_Opt, State_Met, State_Chm )
+!
+! !USES:
+!
+      USE CMN_SIZE_MOD
+      USE GIGC_Input_Opt_Mod, ONLY : OptInput
+      USE GIGC_State_Met_Mod, ONLY : MetState
+      USE GIGC_State_Chm_Mod, ONLY : ChmState
+!
+! !INPUT PARAMETERS:
+!
+      INTEGER,        INTENT(IN)    :: NTRACER                   ! Tracer #
+      REAL,         INTENT(IN)    :: TRACER(IIPAR,JJPAR,LLPAR) ! Tracers from
+                                                                 !rst file [v/v]
+      TYPE(OptInput), INTENT(IN)    :: Input_Opt   ! Input Options object
+      TYPE(MetState), INTENT(IN)    :: State_Met   ! Meteorology State object
+!
+! !INPUT/OUTPUT PARAMETERS:
+!
+      INTEGER,        INTENT(INOUT) :: NCOUNT(NNPAR)       ! # of data blocks
+!                                                          !  for each tracer
+      TYPE(ChmState), INTENT(INOUT) :: State_Chm   ! Chemistry State object
+!
+! !REVISION HISTORY:
+!  (1 ) Added to "restart_mod.f".  Also added parallel loops. (bmy, 6/25/02)
+!  (2 ) Now reference AD from "dao_mod.f" (bmy, 9/18/02)
+!  (3 ) Now exit if N is out of range (bmy, 4/29/03)
+!  (4 ) Now references N_TRACERS, STT & TCVV from "tracer_mod.f" (bmy, 7/20/04)
+!  (5 ) Remove call to TRUE_TRACER_INDEX (bmy, 6/24/05)
+!  11 Jul 2011 - R. Yantosca - Added ProTeX headers
+!  21 Jul 2011 - M. Long     - Now include F77_CMN_SIZE instead of CMN_SIZE
+!  09 Nov 2012 - M. Payer    - Replaced all met field arrays with State_Met
+!                              derived type object
+!  25 Mar 2013 - R. Yantosca - Now pass State_Chm, Input_Opt as arguments
+!EOP
+!------------------------------------------------------------------------------
+!BOC
+!
+! !LOCAL VARIABLES:
+!
+      INTEGER :: I, J, L, N
+
+      !=================================================================
+      ! COPY_STT begins here!
+      !=================================================================
+
+      ! Tracer number
+      N = NTRACER
+
+      ! Exit if N is out of range
+      IF ( N < 1 .or. N > Input_Opt%N_TRACERS ) RETURN
+
+      ! Convert from [v/v] to [kg] and store in STT
+!$OMP PARALLEL DO
+!$OMP+DEFAULT( SHARED )
+!$OMP+PRIVATE( I, J, L )
+      DO L = 1, LLPAR
+      DO J = 1, JJPAR
+      DO I = 1, IIPAR
+         State_Chm%Tracers(I,J,L,N) = TRACER(I,J,L)
+     &                              * State_Met%AD(I,J,L)
+     &                              / Input_Opt%TCVV(N)
       ENDDO
       ENDDO
       ENDDO

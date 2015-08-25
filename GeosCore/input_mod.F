@@ -236,6 +236,7 @@
 !
       LOGICAL            :: EOF
       LOGICAL            :: SEEN_DIAGNOSTIC_MENU, SEEN_SIMULATION_MENU
+      LOGICAL            :: SEEN_CO2_MENU
       INTEGER            :: IOS
       CHARACTER(LEN=1)   :: TAB   = ACHAR(9)
       CHARACTER(LEN=1)   :: SPACE = ' '
@@ -281,6 +282,7 @@
 
       SEEN_DIAGNOSTIC_MENU = .FALSE.
       SEEN_SIMULATION_MENU = .FALSE.
+      SEEN_CO2_MENU        = .FALSE.
 
       ! Loop until EOF
       DO 
@@ -350,7 +352,7 @@
 
          ELSE IF ( INDEX( LINE, 'CO2 SIM MENU'     ) > 0 ) THEN
             CALL READ_CO2_SIM_MENU( am_I_Root, Input_Opt, RC )
-                                    
+            SEEN_CO2_MENU = .TRUE.                                    
          ELSE IF ( INDEX( LINE, 'ENKF MENU'        ) > 0 ) THEN !A. Schuh
             IF (SEEN_SIMULATION_MENU) THEN
                CALL ERROR_STOP("the ENKF MENU in input.geos must " //
@@ -360,6 +362,7 @@
                CALL ERROR_STOP("the ENKF MENU in input.geos must " //
      & "come before the DIAGNOSTIC MENU", LOCATION)
             END IF
+
             IF (SEEN_SIMULATION_MENU .OR. SEEN_DIAGNOSTIC_MENU) STOP
 
             CALL READ_ENKF_MENU
@@ -695,7 +698,7 @@
       USE DIRECTORY_MOD,      ONLY : MERRA_DIR,   GEOS_FP_DIR
       USE DIRECTORY_MOD,      ONLY : RUN_DIR
       USE DIRECTORY_MOD,      ONLY : TEMP_DIR   
-      USE ENKF_MOD,           ONLY : LENKF
+      USE ENKF_MOD,           ONLY : LENKF, RERUN, LLAG
       USE GIGC_ErrCode_Mod
       USE GIGC_Input_Opt_Mod, ONLY : OptInput
       USE GRID_MOD,           ONLY : SET_XOFFSET, SET_YOFFSET
@@ -811,14 +814,13 @@
       PRINT *,'FILE:',IN_RST_FILE,' NYMDb:',NYMDb
       CALL EXPAND_DATE( IN_RST_FILE, NYMDb, NHMSb )
            PRINT *,'FILE:',IN_RST_FILE
-      IF ( LENKF ) THEN
-          !CALL YMD_EXTRACT( NHMSb, HH, MM, SS )
-          !write(CHAR_NYMDb, '(i8.8)') NYMDb
-          !write(CHAR_HH, '(i2.2)' ) HH
-          !CALL EXPAND_DATE( IN_RST_FILE, NYMDb, NHMSb )
-          IN_RST_FILE = TRIM(IN_RST_FILE) // '.0001.h5.nc'
-          !PRINT *,'IN_RST_FILE:',IN_RST_FILE
-      ENDIF
+      !IF (RERUN .and. LLAG) THEN
+      !    IN_RST_FILE = TRIM(IN_RST_FILE) // '.FINALRUN'
+      !ENDIF
+
+      !IF ( LENKF ) THEN
+      !    IN_RST_FILE = TRIM(IN_RST_FILE) // '.0001.h5.nc'
+      !ENDIF
 
       ! Input restart file type, NC or BPCH, AESchuh
       CALL SPLIT_ONE_LINE( SUBSTRS, N, 1, 'read_simulation_menu:5' )
@@ -1329,7 +1331,7 @@
       USE TRACER_MOD,   ONLY : ITS_A_HCN_SIM
       USE TRACER_MOD,   ONLY : ITS_A_MERCURY_SIM
       USE TRACERID_MOD, ONLY : TRACERID
-
+      USE ENKF_MOD,     ONLY : LENKF, RERUN, LLAG
       USE CMN_SIZE_MOD                    ! Size parameters
       USE GIGC_ErrCode_Mod
       USE GIGC_Input_Opt_Mod, ONLY : OptInput
@@ -1384,6 +1386,11 @@
       CALL SPLIT_ONE_LINE( SUBSTRS, N, 1, 'read_tracer_menu:2' )
       READ( SUBSTRS(1:N), * ) N_TRACERS
 
+      IF  ( LLAG .and. LENKF .and. RERUN ) THEN
+            PRINT *,'setting N_TRACERS to 6'
+            N_TRACERS = 6
+      ENDIF
+
       ! Separator line
       CALL SPLIT_ONE_LINE( SUBSTRS, N, -1, 'read_tracer_menu:3' )
       ! NTRACE cannot exceed NNPAR
@@ -1395,6 +1402,8 @@
      
       ! Save N_TRACERS to Input_Opt
       Input_Opt%N_TRACERS = N_TRACERS
+
+      
 
       ! Initialize tracer arrays in tracer_mod.f
       CALL INIT_TRACER( am_I_Root, Input_Opt, RC )
@@ -1540,6 +1549,16 @@
          ENDIF
 
       ENDDO
+
+      ! If running lagged EnKF forward (1 tracer vs 6 tracers), skip next 
+      ! five tracer lines
+      IF  (N_TRACERS == 1 .and. (.not. RERUN) .and. LENKF .and. LLAG) 
+     &     THEN
+       DO C = 1,5
+         PRINT *,'C:',C
+         CALL SPLIT_ONE_LINE( SUBSTRS, N, -1, 'read_tracer_menu:5' )
+       ENDDO
+      ENDIF
 
       ! Separator line
       CALL SPLIT_ONE_LINE( SUBSTRS, N, 1, 'read_tracer_menu:5' )
@@ -6438,7 +6457,7 @@
       USE DIAG50_MOD,  ONLY : INIT_DIAG50
       USE ERROR_MOD,   ONLY : ERROR_STOP
       USE LOGICAL_MOD, ONLY : LND50_HDF
-      USE ENKF_MOD, ONLY    : ENUMBER, LENKF
+      USE ENKF_MOD, ONLY    : ENUMBER, LENKF, RERUN, LLAG
       USE CHARPAK_MOD, ONLY : STRREPL
       USE GIGC_ErrCode_Mod
       USE GIGC_Input_Opt_Mod, ONLY : OptInput
@@ -6513,6 +6532,11 @@
       CALL SPLIT_ONE_LINE( SUBSTRS, N, 1,  'read_nd50_menu:4' )
       READ( SUBSTRS(1:N), '(a)' ) FILE
 
+      ! Append w/ something unique sounding to save "final" co2 from model
+      !IF ( RERUN .eq. 1 ) THEN
+      !     FILE = TRIM(FILE) // '.FINALRUN'
+      !ENDIF
+
       IF ( LENKF ) THEN
          write(CENUMBER, '(i4.4)') ENUMBER
          FILE = TRIM(FILE) // '.' // TRIM(CENUMBER) // '.h5'
@@ -6530,9 +6554,17 @@
 
       ! Tracers to include
       CALL SPLIT_ONE_LINE( SUBSTRS, N_ND50, -1, 'read_nd50_menu:6' )
-      DO N = 1, N_ND50
+
+      IF  ( LENKF .and. RERUN .and. LLAG) THEN
+        N_ND50 = 6
+        DO N=1,6
+           TRACERS(N) = N      
+        ENDDO
+      ELSE
+       DO N = 1, N_ND50
          READ( SUBSTRS(N), * ) TRACERS(N)
-      ENDDO
+       ENDDO
+      ENDIF
 
       ! IMIN, IMAX
       CALL SPLIT_ONE_LINE( SUBSTRS, N, 2,  'read_nd50_menu:7' )

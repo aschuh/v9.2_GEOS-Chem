@@ -460,6 +460,7 @@
      &                      ( STT(I,J,L,N) * TCVV(N) /
      &                      State_Met%AD(I,J,L) )
 
+
             ELSE IF ( N == 91 .and. IS_O3 ) THEN
 
                !--------------------------------------
@@ -798,6 +799,18 @@
          ENDDO
       ENDDO 
 !$OMP END PARALLEL DO
+
+
+      !print *,'(diag 50) State_Met%AD, Tracer 6:',
+      !&     State_Met%AD(40, 30, 1:47)
+
+      !print *,'(diag 50) STT(40,30,1:47,6):',STT(40,30,1:47,6)
+
+      !print *,'(diag 50) TCVV, T=6 ',
+      !&     TCVV(6)
+
+      !print *,'inst tracer(40,30,1,6):',State_Chm%Tracers(40,30,1,6)/
+      !& State_Met%AD(40,30,1) *TCVV(6)
 
       ! Free pointer
       NULLIFY( STT )
@@ -1520,8 +1533,14 @@
       !PRINT *,'Q[100,50,45,1]:',Q(100,50,45,1)
 !      PRINT *,'Q[100,50,45,4]:',Q(100,50,45,4)
 
+      !CALL handleerror(nf90_put_var(ncid=fNCID, varid=variableID,
+      !&  values=REAL(CO2_TO_PPM*Q(1:ND50_NI, 1:ND50_NJ, 1:GMNL, W),4)))
+
       CALL handleerror(nf90_put_var(ncid=fNCID, varid=variableID,
-     &  values=REAL(CO2_TO_PPM*Q(1:ND50_NI, 1:ND50_NJ, 1:GMNL, W),4)))
+     &  values=REAL(CO2_TO_PPM,8)*Q(1:ND50_NI, 1:ND50_NJ, 1:GMNL, W)))
+
+      !print *,'writing to file, T=',W,' Q: 40,30,1:47:',
+      !&     REAL(CO2_TO_PPM,8)*Q(40, 30, 1:GMNL, W)
 
        !print *,'closing netcdf....'
        CALL  handleError(nf90_close(fNCID))

@@ -193,6 +193,7 @@
       USE TIME_MOD,           ONLY : ITS_A_NEW_DAY, ITS_A_NEW_MONTH
       USE TRACERID_MOD,       ONLY : IDBCO2
       USE REGRID_1x1_MOD,     ONLY : INIT_REGRID_1x1,CLEANUP_REGRID_1x1
+      USE ENKF_MOD,           ONLY : RERUN
 !
 ! !INPUT PARAMETERS:
 !
@@ -240,6 +241,7 @@
       ! Local variables
       INTEGER                :: I,     IJLOOP, J,    L,     N,   NN
       INTEGER                :: DAY,   DOY,    HOUR, MONTH, YEAR   
+      INTEGER                :: out_unit
       REAL*8                 :: A_CM2, DTSRCE, E_CO2
       REAL*8                 :: biomass_sum, bionet_sum
 
@@ -858,7 +860,15 @@
       ENDDO
       ENDDO
 !$OMP END PARALLEL DO
-      print *,'Total CO2(kg):',sum(STT)
+      DO L  =  1,SIZE(STT,DIM=4)-1 
+         print *,L,': Total CO2(kg):',sum(STT(:,:,:,l))
+         if (RERUN) then 
+         open (unit=out_unit,file="/discover/nobackup/aschuh/"//
+     &    "results.txt",action="write",status="unknown",access="append")
+          write (out_unit,*) "Tracer:",L," ",sum(STT(:,:,:,l))
+          close (out_unit)
+         endif
+      ENDDO
       ! Free pointer
       NULLIFY( STT )
 
@@ -3291,14 +3301,16 @@
 !
       USE FILE_MOD,         ONLY : FILE_EXISTS
       USE NCCOOARDSFORMAT,  ONLY : readVar2D, readensVar2D
-      USE DIRECTORY_MOD,    ONLY : CT_FLUX_DIR
+      USE DIRECTORY_MOD,    ONLY : CT_FLUX_DIR, DATA_DIR_1x1
       USE TRANSFER_MOD,     ONLY : TRANSFER_2D
       USE TIME_MOD,         ONLY : GET_YEAR, ITS_A_LEAPYEAR, GET_NYMDb
       USE TIME_MOD,         ONLY : GET_NYMD, GET_NHMS, EXPAND_DATE
       USE TIME_MOD,         ONLY : GET_ELAPSED_MIN, YMD_EXTRACT
+      USE TIME_MOD,         ONLY : GET_TIME_AHEAD_B
       USE ENKF_MOD,         ONLY : LLAG, LBIAS, BIASFILE, ENUMBER
       USE ENKF_MOD,         ONLY : CYCLE_LEN, LAG_NUM, BIASFILEIN, RERUN
       USE REGRID_1x1_MOD,   ONLY : DO_REGRID_G2G_1x1, DO_REGRID_1x1
+      USE REGRID_A2A_MOD,     ONLY : DO_REGRID_A2A
       USE CMN_SIZE_MOD      ! Size parameters
       USE CT_INPUT_READ_MOD, ONLY : READ_SCALING_NC
       USE emission_co2_ocean, ONLY : emission_co2_ocean_calc
@@ -3310,6 +3322,7 @@
       USE m_netcdf_io_open
       USE m_netcdf_io_close
       USE m_netcdf_io_write
+
 !
 ! !INPUT PARAMETERS:
 !
@@ -3336,6 +3349,7 @@
       INTEGER                :: NYMD, NHMS
       INTEGER                :: LAG_NUM_NEW
       INTEGER                :: I,J,STATUS
+      INTEGER                :: DATE(2)   ! YYYYMMDD and HHMMSS values      
 !      REAL*4                 :: FLX_ARRAY(IIPAR,JJPAR,1)
       REAL*4                 :: FLX_ARRAY(360,180,1)
       REAL*4                 :: XREAL
@@ -3343,9 +3357,9 @@
       CHARACTER(LEN=255)     :: CURRENT_BIASFILE
       CHARACTER(LEN=4)       :: CYEAR, YYYY_STR
       CHARACTER(LEN=2)       :: CMONTH, MM_STR,DD_STR
-      REAL*8             :: GEN_1x1(360,180,1)
-      REAL*8             :: GEOS_1x1(I1x1,J1x1,1)
-      REAL*8             :: GEOS_GRID(IIPAR,JJPAR,1)
+      REAL*8, TARGET      :: GEN_1x1(360,180,1)
+      !REAL*8             :: GEOS_1x1(I1x1,J1x1,1)
+      !REAL*8             :: GEOS_GRID(IIPAR,JJPAR,1)
       REAL*4               :: SCALING_FACTOR(360,180,1)
 
       logical                       :: flux_updated
@@ -3354,6 +3368,15 @@
       TYPE(ChmState), INTENT(INOUT) :: State_Chm   ! Chemistry State object
 
       TYPE(enkf_parms),dimension(1)   :: parms
+
+      REAL*8, TARGET     :: GEOS_1x1(I1x1,J1x1,1)    !(lmw,05/16/11)
+      REAL*8, TARGET     :: GEOS_GRID(IIPAR,JJPAR,1)
+      !REAL*4             :: REGION_1x1(360,181)
+
+      CHARACTER(LEN=255) :: LLFILENAME
+      REAL*8, POINTER    :: INGRID(:,:)  => NULL()
+      REAL*8, POINTER    :: OUTGRID(:,:) => NULL()
+
       !=================================================================
       ! IF LAT==TRUE THEN PULL SCALING FACTORS
       !=================================================================
@@ -3365,15 +3388,28 @@
           print *,'XDAY:',XDAY
           LAG_NUM_NEW = XDAY + 1
           print *,'lagnumnew:',LAG_NUM_NEW
+          !-- This is for CT, we need to pull lag 2:6 instead of 1:5
+          LAG_NUM_NEW = LAG_NUM_NEW + 1
       ENDIF
 
         ! Extract today's time into HH, MM, and SS sections
         ! (rename minutes to II so as not to overwrite MM)
-        NYMDb = GET_NYMDb()
-        CALL YMD_EXTRACT( NYMDb, YYYY, MM, DD )
+        
 
-         print *,'NYMDb:',NYMDb
-         print *,'MM:',MM
+        IF (RERUN == 0) THEN
+          NYMDb = GET_NYMDb()
+          CALL YMD_EXTRACT( NYMDb, YYYY, MM, DD )
+
+        !print *,'NYMDb:',NYMDb
+        !print *,'MM:',MM
+        ELSEIF (RERUN == 1) THEN
+        !-- Need RERUN to use 1st lag member from the following
+        !-- week's scaling factors
+          DATE = GET_TIME_AHEAD_B(10080)
+          CALL YMD_EXTRACT( DATE(1), YYYY, MM, DD )
+        ELSE
+          STOP 'RERUN needs to be 0 or 1'
+        ENDIF
 
 #if   defined( LINUX_PGI )
 
@@ -3411,6 +3447,11 @@
       ! Create string for day of year
        WRITE( CYEAR, '(i4)' ) YEAR
        WRITE( CMONTH, '(i2.2)' ) MONTH
+
+      ! File with lat/lon edges for regridding
+      LLFILENAME = TRIM( DATA_DIR_1x1) //
+     &             'MAP_A2A_Regrid_201203/MAP_A2A_latlon_generic1x1.nc'
+
 
       FLUX_FILENAME = TRIM( CT_FLUX_DIR ) //
       !&                'flux.e622.co2.3hrly.'   //
@@ -3450,11 +3491,14 @@
           CALL readVar2D(TRIM(FLUX_FILENAME),'NEE',
      &      360,180, (DAY-1)*8+HOUR/3+1,FLX_ARRAY(:,:,1))
       ENDIF
-      
+      PRINT *,'FLX_ARRAY(295,125,1):',FLX_ARRAY(295,125,1)      
       IF(LLAG) THEN
          print *,'scaling fluxes ....','using nlag:',LAG_NUM_NEW
          FLX_ARRAY(:,:,1) = FLX_ARRAY(:,:,1) * SCALING_FACTOR(:,:,1)
       ENDIF
+
+      PRINT *,'SCALING_FACTOR(295,125,1):',SCALING_FACTOR(295,125,1)
+      PRINT *,'FLX_ARRAY(295,125,1):',FLX_ARRAY(295,125,1)
 
       ! Cast to REAL*8 before regridding
       !DO I=1,360
@@ -3465,11 +3509,23 @@
 
       GEN_1x1(:,:,1) = FLX_ARRAY(:,:,1)
 
+      print *,'11min bio flux (molc/m2/sec):',MINVAL(GEN_1x1)
+      print *,'11max bio flux (molc/m2/sec):',MAXVAL(GEN_1x1)
+      print *,'11sum bio flux:',SUM(GEN_1x1)
+
+      ! Regrid from GENERIC 1x1 --> current model resolution
+      INGRID  => GEN_1x1  (:,:,1)
+      OUTGRID => GEOS_GRID(:,:,1)
+
+      CALL DO_REGRID_A2A( LLFILENAME, I1x1,    J1x1-1,
+     &                    INGRID,     OUTGRID, IS_MASS=0,
+     &                    netCDF=.TRUE.                   )
+
       ! Regrid from GENERIC 1x1 --> GEOS 1x1
-      CALL DO_REGRID_G2G_1x1( 'molec/m2/s', GEN_1x1, GEOS_1x1 )
+      !CALL DO_REGRID_G2G_1x1( 'molec/m2/s', GEN_1x1, GEOS_1x1 )
 
       ! Regrid from GEOS 1x1 --> current model resolution
-      CALL DO_REGRID_1x1( 1, 'molec/m2/s', GEOS_1x1, GEOS_GRID)
+      !CALL DO_REGRID_1x1( 1, 'molec/m2/s', GEOS_1x1, GEOS_GRID)
 
       
 
@@ -3491,10 +3547,16 @@
       !-- Then convert molC to molecules C via Avos #
       !RARRAY = ( 10.**-4. * 6.0221415*10.**23. ) * RARRAY
 
+      print *,'min bio flux (molc/m2/sec):',MINVAL(GEOS_GRID)
       print *,'max bio flux (molc/m2/sec):',MAXVAL(GEOS_GRID)
-      !print *,'min flux:',MINVAL(FLX_ARRAY)
+      print *,'sum bio flux:',SUM(GEOS_GRID)
+      !print *,'bio fluxes:',GEOS_GRID
+
 
       EMBIOCO2 = GEOS_GRID(:,:,1) * 6.022142e+19_8
+
+      ! Free pointers
+      NULLIFY( INGRID, OUTGRID )
 
       !print *,'max flx_array flux:',MAXVAL(FLX_ARRAY)*6.02e+19_8
       !print *,'max gen_1x1 flux:',MAXVAL(GEN_1x1)*6.02e+19_8
@@ -3530,20 +3592,31 @@
 
       GEN_1x1(:,:,1) = FLX_ARRAY(:,:,1)
 
+      ! Regrid from GENERIC 1x1 --> current model resolution
+      INGRID  => GEN_1x1  (:,:,1)
+      OUTGRID => GEOS_GRID(:,:,1)
+
+      CALL DO_REGRID_A2A( LLFILENAME, I1x1,    J1x1-1,
+     &                    INGRID,     OUTGRID, IS_MASS=0,
+     &                    netCDF=.TRUE.                   )
+
       !PRINT *,'GEN_1x1:',GEN_1x1(360,180,1)
 
       !CALL TRANSFER_2D( FLX_ARRAY(:,:,1), GEN_1x1 )
 
       ! Regrid from GENERIC 1x1 --> GEOS 1x1
-      CALL DO_REGRID_G2G_1x1( 'molec/m2/s', GEN_1x1, GEOS_1x1 )
+      !CALL DO_REGRID_G2G_1x1( 'molec/m2/s', GEN_1x1, GEOS_1x1 )
 
       ! Regrid from GEOS 1x1 --> current model resolution
-      CALL DO_REGRID_1x1( 1, 'molec/m2/s', GEOS_1x1, GEOS_GRID)
+      !CALL DO_REGRID_1x1( 1, 'molec/m2/s', GEOS_1x1, GEOS_GRID)
 
       !print *,'max flux:',MAXVAL(FLX_ARRAY)
       !print *,'min flux:',MINVAL(FLX_ARRAY)
 
       EMFOSSCO2 = GEOS_GRID(:,:,1) * 6.022142e+19_8 
+
+      ! Free pointers
+      NULLIFY( INGRID, OUTGRID )
 
       !print *,'max flx_array flux:',MAXVAL(FLX_ARRAY)*6.02e+19_8
       !print *,'max gen_1x1 flux:',MAXVAL(GEN_1x1)*6.02e+19_8
@@ -3579,16 +3652,27 @@
 
       GEN_1x1(:,:,1) = FLX_ARRAY(:,:,1)
 
+      ! Regrid from GENERIC 1x1 --> current model resolution
+      INGRID  => GEN_1x1  (:,:,1)
+      OUTGRID => GEOS_GRID(:,:,1)
+
+      CALL DO_REGRID_A2A( LLFILENAME, I1x1,    J1x1-1,
+     &                    INGRID,     OUTGRID, IS_MASS=0,
+     &                    netCDF=.TRUE.                   )
+
       ! Regrid from GENERIC 1x1 --> GEOS 1x1
-      CALL DO_REGRID_G2G_1x1( 'molec/m2/s', GEN_1x1, GEOS_1x1 )
+      !CALL DO_REGRID_G2G_1x1( 'molec/m2/s', GEN_1x1, GEOS_1x1 )
 
       ! Regrid from GEOS 1x1 --> current model resolution
-      CALL DO_REGRID_1x1( 1, 'molec/m2/s', GEOS_1x1, GEOS_GRID)
+      !CALL DO_REGRID_1x1( 1, 'molec/m2/s', GEOS_1x1, GEOS_GRID)
 
       !print *,'max flux:',MAXVAL(FLX_ARRAY)
       !print *,'min flux:',MINVAL(FLX_ARRAY)
 
       EMBIOBRNCO2 = GEOS_GRID(:,:,1) * 6.022142e+19
+
+      ! Free pointers
+      NULLIFY( INGRID, OUTGRID )
 
       !print *,'max flx_array flux:',MAXVAL(FLX_ARRAY)*6.02e+19_8
       !print *,'max gen_1x1 flux:',MAXVAL(GEN_1x1)*6.02e+19_8
@@ -3623,6 +3707,14 @@
       !GEN_1x1(:,:,1) = FLX_ARRAY(:,:,1)
       GEN_1x1(:,:,1) = co2_ocn(1)%surf
 
+      ! Regrid from GENERIC 1x1 --> current model resolution
+      INGRID  => GEN_1x1  (:,:,1)
+      OUTGRID => GEOS_GRID(:,:,1)
+
+      CALL DO_REGRID_A2A( LLFILENAME, I1x1,    J1x1-1,
+     &                    INGRID,     OUTGRID, IS_MASS=0,
+     &                    netCDF=.TRUE.                   )
+
       ! Cast to REAL*8 before regridding
       !DO I=1,360
       !  DO J=1,180
@@ -3631,10 +3723,10 @@
       !END DO
 
       ! Regrid from GENERIC 1x1 --> GEOS 1x1
-      CALL DO_REGRID_G2G_1x1( 'molec/m2/s', GEN_1x1, GEOS_1x1 )
+      !CALL DO_REGRID_G2G_1x1( 'molec/m2/s', GEN_1x1, GEOS_1x1 )
 
       ! Regrid from GEOS 1x1 --> current model resolution
-      CALL DO_REGRID_1x1( 1, 'molec/m2/s', GEOS_1x1, GEOS_GRID)
+      !CALL DO_REGRID_1x1( 1, 'molec/m2/s', GEOS_1x1, GEOS_GRID)
 
       !print *,'max flux:',MAXVAL(GEOS_GRID)
       !print *,'min flux:',MINVAL(GEOS_GRID)
@@ -3646,12 +3738,12 @@
          NHMS  = GET_NHMS()
          CALL EXPAND_DATE( OCEANF,  NYMD, NHMS )
  
-         IF (.not. FILE_EXISTS ( OCEANF ) ) THEN
+               IF (.not. FILE_EXISTS ( OCEANF ) ) THEN
             CALL SETUP_CT_OCFL_OUT( )
          END IF
       
          CALL NcOp_Wr(NCID,OCEANF)
-         CALL Ncwr(GEN_1x1(:,:,1)/SCALING_FACTOR(:,:,1), NCID,
+         CALL Ncwr(GEN_1x1  (:,:,1)/SCALING_FACTOR(:,:,1), NCID,
      &   'ocean_flux',(/ 1,1, (HOUR/3+1) /), (/ 360,180,1 /) )
          CALL NcCl(NCID)
       ENDIF
@@ -3659,13 +3751,17 @@
       !--  same as above but we're converting mol C instead of umol C
       EMOCCO2 = GEOS_GRID(:,:,1) * 6.022142e+19 
 
-      print *,'max flx_array flux:',MAXVAL(FLX_ARRAY)*6.02e+19_8
-      print *,'max gen_1x1 flux:',MAXVAL(GEN_1x1)*6.02e+19_8
+      !print *,'max flx_array flux:',MAXVAL(FLX_ARRAY)*6.02e+19_8
+      !print *,'max gen_1x1 flux:',MAXVAL(GEN_1x1)*6.02e+19_8
       print *,'max geos_grid flux:',MAXVAL(GEOS_GRID)*6.02e+19_8
-      print *,'min embioco2 (molc/m2/sec)flux:',MINVAL(GEOS_GRID)
-      print *,'max embioco2 (molc/m2/sec)flux:',MAXVAL(GEOS_GRID)
+      print *,'sum ocn flux:',SUM(GEOS_GRID)
+      print *,'min emocco2 (molc/m2/sec)flux:',MINVAL(GEOS_GRID)
+      print *,'max emocco2 (molc/m2/sec)flux:',MAXVAL(GEOS_GRID)
 
       print *,'max flux:',MAXVAL(FLX_ARRAY)
+
+      ! Free pointers
+      NULLIFY( INGRID, OUTGRID )
 
       !print *,'max flux',maxval(flx_array)
       !print *,'min flux:',minval(flx_array)
