@@ -54,6 +54,7 @@
       PUBLIC  :: GET_NHMS
       PUBLIC  :: GET_NDIAGTIME
       PUBLIC  :: GET_TIME_AHEAD
+      PUBLIC  :: GET_TIME_AHEAD_B
       PUBLIC  :: GET_MONTH
       PUBLIC  :: GET_DAY
       PUBLIC  :: GET_YEAR
@@ -1633,6 +1634,78 @@
 #endif
 
       END FUNCTION GET_TIME_AHEAD
+!EOC
+!------------------------------------------------------------------------------
+!          Harvard University Atmospheric Chemistry Modeling Group            !
+!------------------------------------------------------------------------------
+!BOP
+!
+! !IROUTINE: get_time_ahead
+!
+! !DESCRIPTION: Function GET\_3h\_AHEAD returns to the calling program a
+!  2-element vector containing the YYYYMMDD and HHMMSS values at the current
+!  time plus N\_MINS minutes.
+!\\
+!\\
+! !INTERFACE:
+!
+      FUNCTION GET_TIME_AHEAD_B( N_MINS ) RESULT( DATE )
+!
+! !USES:
+!
+      USE JULDAY_MOD, ONLY : CALDATE
+!
+! !INPUT PARAMETERS:
+!
+      INTEGER, INTENT(IN) :: N_MINS   ! Minutes ahead to compute date & time
+!
+! !RETURN VALUE:
+!
+      INTEGER             :: DATE(2)  ! Date & time output
+!
+! !REVISION HISTORY:
+!  21 Mar 2003 - R. Yantosca - Initial Version
+!  (1 ) Bug fix for GCAP leap year case (phs, bmy, 12/8/06)
+!  15 Jan 2010 - R. Yantosca - Added ProTeX headers
+!  17 Dec 2010 - R. Yantosca - Added fix in case HHMMSS is returned as 240000
+!  20 Aug 2013 - R. Yantosca - Removed "define.h", this is now obsolete
+!EOP
+!------------------------------------------------------------------------------
+!BOC
+!
+! !LOCAL VARIABLES:
+!
+      INTEGER :: THISYEAR, THISMONTH, THISDAY, TMP
+      REAL*8  :: JD
+
+      !=================================================================
+      ! GET_TIME_AHEAD begins here!
+      !=================================================================
+
+      ! Astronomical Julian Date at current time + N_MINS
+      JD = GET_JD( NYMDb, NHMSb ) + ( N_MINS / 1440d0 )
+
+      ! Call CALDATE to compute the current YYYYMMDD and HHMMSS
+      CALL CALDATE( JD, DATE(1), DATE(2) )
+
+      ! Check to see if HHMMSS is 240000.  This may occur due to a
+      ! roundoff error in CALDATE.  If this is the case, then add 1
+      ! to the date and then set HHMMSS = 0.  Use the GET_JD and
+      ! CALDATE functions to do this computation rigorously.
+      IF ( DATE(2) == 240000 ) THEN
+
+         ! Split the date into Y/M/D variables
+         CALL YMD_EXTRACT( DATE(1), THISYEAR, THISMONTH, THISDAY )
+
+         ! Increment the Astronomical Julian Date by 1 day
+         TMP = THISYEAR*10000 + THISMONTH*100 + THISDAY
+         JD  = GET_JD( TMP, 000000 ) + 1
+
+         ! Convert to YYYY/MM/DD and hh:mm:ss
+         CALL CALDATE( JD, DATE(1), DATE(2) )
+      ENDIF
+
+      END FUNCTION GET_TIME_AHEAD_B
 !EOC
 !------------------------------------------------------------------------------
 !          Harvard University Atmospheric Chemistry Modeling Group            !
