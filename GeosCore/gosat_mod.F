@@ -39,6 +39,7 @@
       PRIVATE :: RO2_SETUP
       PRIVATE :: TEST_VALID
       PRIVATE :: WRITE_VARS_TO_FILE
+      PRIVATE :: WRITE_LITE_OUTPUT
 !
 ! !REMARKS:
 !  The quantities that are saved to disk by the GOSAT diagnostic were
@@ -83,6 +84,34 @@
 !------------------------------------------------------------------------------
 !BOC
 !
+!=========================================================================
+! Derived type for Lite Output
+!=========================================================================
+      TYPE, PUBLIC :: LITE_DATA_OBJECT
+      !----------------------------------------------------------------------
+      ! netcdf integer fields
+      !----------------------------------------------------------------------
+      INTEGER*8,  POINTER :: SOUNDING_ID(:)
+
+      !-----------------------------------------------------------------------
+      ! netcdf real4  fields
+      !-----------------------------------------------------------------------
+
+      REAL,  POINTER       :: XCO2_MODEL  (: )
+      REAL,  POINTER       :: XCO2FREETROP_MODEL(: )
+      REAL,  POINTER       :: XCO2PBL_MODEL(: )
+      REAL,  POINTER       :: XCO2_OBSERVED(: )
+      REAL,  POINTER       :: XCO2_UNCERTAINTY(: )
+      REAL,  POINTER       :: XCO2PBL_OBSERVED(: )
+      REAL,  POINTER       :: XCO2PBL_UNCERTAINTY(: )
+      REAL,  POINTER       :: XCO2FREETROP_OBSERVED(: )
+      REAL,  POINTER       :: XCO2FREETROP_UNCERTAINTY(: )
+      REAL,  POINTER       :: LATITUDE     (:  )
+      REAL,  POINTER       :: LONGITUDE     (:  )
+      REAL,  POINTER       :: TIME       (:  )
+
+      END TYPE LITE_DATA_OBJECT
+
 ! !PRIVATE TYPES:
 !
       !=================================================================
@@ -205,6 +234,12 @@
       USE TRACER_MOD, ONLY : ITS_A_FULLCHEM_SIM
       USE NCCOOARDSFORMAT, ONLY :ncGOSATOutputCreate,ncGOSATOutputClose
       USE NCCOOARDSFORMAT, ONLY :READGOSAT_ID,READGOSAT_REAL8 
+      USE m_netcdf_io_close
+      USE m_netcdf_io_open
+      USE m_netcdf_io_read
+      USE m_netcdf_io_get_dimlen
+      USE m_do_err_out
+
 !
 ! !INPUT PARAMETERS:
 !
@@ -239,10 +274,13 @@
       LOGICAL            :: IS_OPEN
       INTEGER            :: I,  IP,      N,   TEMP, LENGTH
       INTEGER            :: RN, COUNTER, IOS, NYMD, NHMS
+      INTEGER            :: NCID, DIM_LEN
+      INTEGER, dimension(:), allocatable :: ID4
       INTEGER*8, dimension(:), allocatable :: ID
       REAL*8, dimension(:), allocatable :: XCO2_OBS,XCO2_UNCERT
       REAL*8, dimension(:), allocatable :: XCO2PBL_OBS,XCO2PBL_UNCERT
       REAL*8, dimension(:), allocatable :: XCO2FT_OBS,XCO2FT_UNCERT
+      REAL*8, dimension(:), allocatable :: XCO2_LATITUDE,XCO2_LONGITUDE
       CHARACTER(LEN=7)   :: NAMES
       CHARACTER(LEN=20)  :: LINE
       CHARACTER(LEN=10)  :: TYPE
@@ -352,6 +390,7 @@
 ! 110  FORMAT( A5,X,A5,X,A8,X,A4,X,A7,X,A7,X,A7,X,95(a10,x) )
 ! 110  FORMAT( A5,X,A5,X,A8,X,A4,X,A7,X,A7,X,A7,X,A7,X,200(a10,x) )
 
+       ALLOCATE( ID4( NPOINTS ) )
        ALLOCATE( ID( NPOINTS ) )
        ALLOCATE( XCO2_OBS (NPOINTS) )
        ALLOCATE( XCO2_UNCERT (NPOINTS) )
@@ -359,29 +398,70 @@
        ALLOCATE( XCO2FT_UNCERT (NPOINTS) )
        ALLOCATE( XCO2PBL_OBS (NPOINTS) )
        ALLOCATE( XCO2PBL_UNCERT (NPOINTS) )
+       ALLOCATE( XCO2_LATITUDE (NPOINTS) )
+       ALLOCATE( XCO2_LONGITUDE (NPOINTS) )
 
-       CALL READGOSAT_ID( trim (INF), NPOINTS, ID)
+       
+      ! CALL READGOSAT_ID( trim (INF), NPOINTS, ID)
+      !PRINT *,'ID1:',ID
 
       !  CALL READGOSAT_REAL4( trim (INF), 'xco2_raw', 'Retrieval',
       !&  ACOS_XCO2, NPOINTS)
 
-       CALL READGOSAT_REAL8( trim (INF), 'xco2_observed', '',
-     &  XCO2_OBS, NPOINTS)
+      CALL Ncop_Rd( NCID, trim(INF) )
 
-      CALL READGOSAT_REAL8( trim (INF), 'xco2_uncertainty', '',
-     &  XCO2_UNCERT, NPOINTS)
+      CALL Ncget_Unlim_Dimlen (NCID, DIM_LEN)
 
-       CALL READGOSAT_REAL8( trim (INF), 'xco2freetrop_observed', '',
-     &  XCO2FT_OBS, NPOINTS)
+      PRINT *,'DIM:',DIM_LEN
+      ID = 0
+      CALL Ncrd(ID, ncid, 'sounding_id', (/ 1 /), (/ DIM_LEN /))
+      !ID = INT8(ID4)
 
-      CALL READGOSAT_REAL8( trim (INF), 'xco2freetrop_uncertainty', '',
-     &  XCO2FT_UNCERT, NPOINTS)
+      CALL Ncrd(XCO2_OBS, ncid, 'xco2_observed', (/ 1 /), (/ DIM_LEN /))
+      PRINT *,'xco2_obs:',XCO2_OBS
 
-       CALL READGOSAT_REAL8( trim (INF), 'xco2pbl_observed', '',
-     &  XCO2PBL_OBS, NPOINTS)
+      CALL Ncrd(XCO2_UNCERT, ncid, 'xco2_uncertainty', (/ 1 /),
+     &   (/ DIM_LEN /))
 
-      CALL READGOSAT_REAL8( trim (INF), 'xco2pbl_uncertainty', '',
-     &  XCO2PBL_UNCERT, NPOINTS)
+      CALL Ncrd(XCO2FT_OBS, ncid, 'xco2freetrop_observed', (/ 1 /), 
+     &   (/ DIM_LEN /))
+
+      CALL Ncrd(XCO2FT_UNCERT, ncid, 'xco2freetrop_uncertainty',(/ 1 /),
+     &   (/ DIM_LEN /))
+
+      CALL Ncrd(XCO2PBL_OBS, ncid, 'xco2pbl_observed', (/ 1 /), 
+     &   (/ DIM_LEN /))
+
+      CALL Ncrd(XCO2PBL_UNCERT, ncid, 'xco2pbl_uncertainty', (/ 1 /), 
+     &   (/ DIM_LEN /))
+
+      CALL Ncrd(XCO2_LONGITUDE, ncid, 'longitude', (/ 1 /),
+     &   (/ DIM_LEN /))
+
+      CALL Ncrd(XCO2_LATITUDE, ncid, 'latitude', (/ 1 /),
+     &   (/ DIM_LEN /))
+
+      PRINT *,'XCO2_LAT:',XCO2_LATITUDE
+
+      CALL Nccl( NCID )
+
+       !CALL READGOSAT_REAL8( trim (INF), 'xco2_observed', '',
+       !&  XCO2_OBS, NPOINTS)
+
+       !CALL READGOSAT_REAL8( trim (INF), 'xco2_uncertainty', '',
+       ! &  XCO2_UNCERT, NPOINTS)
+
+       !CALL READGOSAT_REAL8( trim (INF), 'xco2freetrop_observed', '',
+       !&  XCO2FT_OBS, NPOINTS)
+
+       !CALL READGOSAT_REAL8( trim (INF), 'xco2freetrop_uncertainty', '',
+       !&  XCO2FT_UNCERT, NPOINTS)
+
+       !CALL READGOSAT_REAL8( trim (INF), 'xco2pbl_observed', '',
+       !&  XCO2PBL_OBS, NPOINTS)
+
+       !CALL READGOSAT_REAL8( trim (INF), 'xco2pbl_uncertainty', '',
+       !&  XCO2PBL_UNCERT, NPOINTS)
 
       ! CALL READGOSAT_REAL4( trim (INF), 'albedo_2', 'Retrieval',
       !&  ACOS_UNCERT, NPOINTS)
@@ -407,7 +487,8 @@
       ! CALL READGOSAT_REAL4( trim (INF), 'longitude', 'Retrieval',
       !&  ACOS_UNCERT, NPOINTS)
 
-       CALL ncGOSATOutputCreate(trim(OUTF),NPOINTS,ID,XCO2_OBS,
+       CALL ncGOSATOutputCreate(trim(OUTF),NPOINTS,XCO2_LATITUDE,
+     &   XCO2_LONGITUDE, ID,XCO2_OBS,
      &  XCO2_UNCERT,XCO2PBL_OBS,XCO2PBL_UNCERT,XCO2FT_OBS,XCO2FT_UNCERT,
      &  "xco2_model","xco2pbl_model",
      &    "xco2freetrop_model")
@@ -419,11 +500,472 @@
        DEALLOCATE( XCO2PBL_UNCERT)
        DEALLOCATE( XCO2FT_OBS)
        DEALLOCATE( XCO2FT_UNCERT)
+       DEALLOCATE( XCO2_LATITUDE )
+       DEALLOCATE( XCO2_LONGITUDE )
 
        !CALL ncGOSATOutputClose
 
       END SUBROUTINE SETUP_GOSAT
 !EOC
+!------------------------------------------------------------------------------
+!          Harvard University Atmospheric Chemistry Modeling Group            !
+!------------------------------------------------------------------------------
+!BOP
+!
+! !IROUTINE: write_lite_output
+!
+! !DESCRIPTION: Subroutine READ\_POINTS reads the information (ID, date, time,
+!  lat, lon, pressure) for each measurement listed in the input file, and
+!  sorts these into the appropriate module variables.
+!\\
+!\\
+! !INTERFACE:
+!
+
+      SUBROUTINE WRITE_LITE_OUTPUT(fname,lite_data,
+     &  NPOINTS )
+!
+!******************************************************************************
+!  Subroutine GET_I6_FIELDS_2 is a wrapper for routine READ_I6.  This routine
+!  calls READ_I6 properly for reading I-6 fields from GEOS-3, GEOS-4, GEOS_5,
+!  or GCAP met data sets every 6 hours during a GEOS-CHEM run.
+!  (bmy, 6/23/03, 1/16/07)
+!
+!  Arguments as Input:
+!  ============================================================================
+!  (1 ) NYMD (INTEGER) : YYYYMMDD
+!  (2 ) NHMS (INTEGER) :  and HHMMSS of A-3 fields to be read from disk
+!
+!  NOTES:
+!  (1 ) Now modified for GEOS-5 and GCAP met fields
+!  (2 ) Remove support for GEOS-1 and GEOS-STRAT met fields (bmy, 8/4/06)
+!  (3 ) Now read TO3 and TTO3 for GEOS-5 (bmy, 1/16/07)
+!  28 Feb 2012 - R. Yantosca - Removed support for GEOS-3
+!  09 Nov 2012 - M. Payer    - Copy all met fields to the State_Met derived type
+!                              object
+!  15 Nov 2012 - R. Yantosca - Now replace dao_mod.F arrays with State_Met
+!******************************************************************************
+!
+      ! References to F90 modules
+      USE netcdf
+      USE m_netcdf_io_open
+      USE m_netcdf_io_close
+      USE m_netcdf_io_read
+      USE m_netcdf_io_write
+      USE m_netcdf_io_get_dimlen
+      USE m_do_err_out
+      USE m_netcdf_io_create
+      USE m_netcdf_io_define
+
+      ! Arguments
+      TYPE(LITE_DATA_OBJECT), INTENT(IN) :: lite_data  ! Meteorology State object
+      character* (*),         INTENT(IN)    :: fname
+      INTEGER,                INTENT(IN)    :: NPOINTS
+
+      ! Local Variables
+      integer                               :: NCID, DIM_LEN
+      !integer,  dimension(:), allocatable   :: SAMPLE_STRATEGY
+
+      ! For netCDF file I/O
+      INTEGER              :: idLevels,idSoundingDim
+      !INTEGER             :: idObs,    idTracer,   idTname, idChar100
+      !INTEGER             :: idRgNmLen,  idGridInd
+      INTEGER             :: fId
+      INTEGER             ::  vId
+      !INTEGER             :: ct1d(1),  ct2d(2), ct3d(3), ct4d(4)
+      !INTEGER             :: st1d(1),  st2d(2), st3d(3), st4d(4)
+      INTEGER             :: var1(1),var2(1)
+
+      !-- Pointer to CT input object ID
+      !CHARACTER, POINTER :: P_ID(:,:)
+
+      !=========================================================================
+      ! Create the netCDF file
+      !=========================================================================
+
+      ! Echo info
+      WRITE( 6, '(a)' ) '=== Begin netCDF file creation test ==='
+      PRINT *,'WRITING ',NPOINTS,' observations'
+      CALL NcCr_Wr( fId, TRIM(fname) )
+
+      ! Turn filling off
+      !CALL NcSetFill( fId, NF_NOFILL, omode )
+
+      !=========================================================================
+      ! Define the dimensions
+      !=========================================================================
+
+      ! Sounding dimension
+      !WRITE( 6, '(a)' ) 'Writing obs  (dim     ) to netCDF file'
+      CALL NcDef_Dimension( fId, 'sounding_id',  NPOINTS, idSoundingDim)
+      !CALL NcDef_Unlim_Dimension( fId, 'obs',idObs)
+
+      ! Levels dimension
+      !WRITE( 6, '(a)' ) 'Writing tracer   (dim     ) to netCDF file'
+      CALL NcDef_Dimension( fId, 'levels',  47,  idLevels )
+
+      !=========================================================================
+      ! Define the variables and variable attributes
+      ! for COARDS compliance and GAMAP compliance
+      !=========================================================================
+      CALL NcDef_Glob_Attributes( fId, 'Title',       'NcdfUtilities' )
+      CALL NcDef_Glob_Attributes( fId, 'History',     '24 Jan 2011'   )
+      CALL NcDef_Glob_Attributes( fId, 'Conventions', 'COARDS'        )
+      CALL NcDef_Glob_Attributes( fId, 'Model',       'GEOS4'         )
+      CALL NcDef_Glob_Attributes( fId, 'Nlayers',     '55'            )
+      CALL NcDef_Glob_Attributes( fId, 'Start_Date',  '20110101'      )
+      CALL NcDef_Glob_Attributes( fId, 'Start_Time',  '00:00:00.0'    )
+      CALL NcDef_Glob_Attributes( fId, 'End_Date',    '20110101'      )
+      CALL NcDef_Glob_Attributes( fId, 'End_Time',    '23:59:59.0'    )
+      CALL NcDef_Glob_Attributes( fId, 'Delta_Lon',   '5'             )
+      CALL NcDef_Glob_Attributes( fId, 'Delta_Lat',   '4'             )
+      CALL NcDef_Glob_Attributes( fId, 'Delta_time',  '000000'        )
+      CALL NcDef_Glob_Attributes( fId, 'Format',      'netCDF-3'      )
+      CALL NcDef_Glob_Attributes( fId,'valid_range',(/-1e15,+1e15 /)  )
+
+      !=========================================================================
+      ! Define the variables and variable attributes
+      !=========================================================================
+
+      ! Time index array (hardwire date to 2011/01/01)
+      !var1    = (/ idTime /)
+      vId     = -1
+      !units   = 'minutes since 2011-01-01 00:00:00 GMT'
+      !delta_t = '0000-00-00 00:00:00'
+      !begin_d = '20110101'
+      !begin_t = '000000'
+      !incr    = '000000'
+      !CALL NcDef_Variable      ( fId, 'time', NF90_INT,  1, var1, vId           )
+      !CALL NcDef_Var_Attributes( fId, vId, 'long_name',      'time'           )
+      !CALL NcDef_Var_Attributes( fId, vId, 'units',          TRIM( units   )  )
+      !CALL NcDef_Var_Attributes( fId, vId, 'delta_t',        TRIM( delta_t )  )
+      !CALL NcDef_Var_Attributes( fId, vId, 'begin_date',     TRIM( begin_d )  )
+      !CALL NcDef_Var_Attributes( fId, vId, 'begin_time',     TRIM( begin_t )  )
+      !CALL NcDef_Var_Attributes( fId, vId, 'time_increment', TRIM( incr    )  )
+
+      ! Define sounding_id variable
+      vId  = vId + 1
+      var1 = (/ idSoundingDim /)
+      CALL NcDef_Variable( fId, 'sounding_id', NF90_INT64,1, var1, vId )
+      !CALL NcDef_Var_Attributes( fId, vId, 'long_name', 'Sounding ID' )
+
+      ! Define latitude variable
+      vId  = vId + 1
+      CALL NcDef_Variable( fId, 'latitude', NF90_FLOAT,1, var1, vId )
+
+      ! Define longitude variable
+      vId  = vId + 1
+      CALL NcDef_Variable( fId, 'longitude', NF90_FLOAT,1, var1, vId )
+
+      ! Define latitude variable
+      vId  = vId + 1
+      CALL NcDef_Variable( fId, 'xco2_model', NF90_FLOAT,1, var1, vId )
+
+      ! Define longitude variable
+      vId  = vId + 1
+      CALL NcDef_Variable( fId, 'xco2freetrop_model', NF90_FLOAT,1, 
+     &     var1, vId )
+
+      ! Define longitude variable
+      vId  = vId + 1
+      CALL NcDef_Variable( fId, 'xco2pbl_model', NF90_FLOAT,1,
+     &     var1, vId )
+
+      ! Define latitude variable
+      vId  = vId + 1
+      CALL NcDef_Variable( fId, 'xco2_observed',NF90_FLOAT,1,var1,vId )
+
+      ! Define longitude variable
+      vId  = vId + 1
+      CALL NcDef_Variable( fId, 'xco2_uncertainty', NF90_FLOAT,1,
+     &     var1, vId )
+
+      ! Define latitude variable
+      vId  = vId + 1
+      CALL NcDef_Variable( fId, 'xco2freetrop_observed', NF90_FLOAT,1, 
+     &    var1, vId )
+
+      ! Define longitude variable
+      vId  = vId + 1
+      CALL NcDef_Variable(fId,'xco2freetrop_uncertainty', NF90_FLOAT,1,
+     &     var1, vId )
+
+      ! Define latitude variable
+      vId  = vId + 1
+      CALL NcDef_Variable( fId, 'xco2pbl_observed', NF90_FLOAT,1, 
+     &   var1, vId )
+
+      ! Define longitude variable
+      vId  = vId + 1
+      CALL NcDef_Variable( fId, 'xco2pbl_uncertainty', NF90_FLOAT,1,
+     &     var1, vId )
+
+      ! Define longitude variable
+      vId  = vId + 1
+      CALL NcDef_Variable( fId, 'time', NF90_DOUBLE,1,
+     &     var1, vId )
+
+      var2 = (/ 47 /)     
+
+      CALL NcDef_Variable( fId, 'levels', NF90_INT, 1, var2, vId+1 )
+
+      CALL NcDef_Variable( fId, 'pressure_levels', NF90_DOUBLE, 1, 
+     &    var2, vId+2 )
+      CALL NcDef_Variable( fId, 'pressure_weights', NF90_DOUBLE, 1, 
+     &    var2, vId+3 )
+
+      !=========================================================================
+      ! %%% END OF DEFINITION SECTION %%%
+      ! %%% NOW WRITE DATA TO FILE    %%%
+      !=========================================================================
+      CALL NcEnd_def( fId )
+
+      !P_ID     =>   Object_Lite_Data%ID
+
+      !PRINT *,'FIRST POINT:',P_ID(1:100,1)
+      !CALL NcWr(P_ID(1:100,1:NPOINTS) ,fId, 'obspack_id',
+      !&   (/ 1,1 /),(/ 100, NPOINTS /) )
+
+      CALL NcWr(lite_data%latitude(1:NPOINTS),fId,
+     &    'latitude',(/ 1 /),(/ NPOINTS /) )
+
+      CALL NcWr(lite_data%longitude(1:NPOINTS),fId,
+     &    'longitude',(/ 1 /),(/ NPOINTS /) )
+
+      CALL NcWr(lite_data%xco2_model(1:NPOINTS),fId,
+     &    'xco2_model',(/ 1 /),(/ NPOINTS /) )
+
+      CALL NcWr(lite_data%xco2freetrop_model(1:NPOINTS),fId,
+     &    'xco2freetrop_model',(/ 1 /),(/ NPOINTS /) )
+
+      !=========================================================================
+      ! Close the netCDF file
+      !=========================================================================
+      CALL NcCl( fId )
+
+      !NULLIFY(P_ID)
+
+      ! Echo info
+      WRITE( 6, '(a)' ) '=== End netCDF file creation test ==='
+
+      ! Return to calling program
+      END SUBROUTINE WRITE_LITE_OUTPUT
+!------------------------------------------------------------------------------
+!          Harvard University Atmospheric Chemistry Modeling Group            !
+!------------------------------------------------------------------------------
+!BOP
+!
+! !IROUTINE: init_Lite_Data_Object
+!
+!\\
+!\\
+! !INTERFACE:
+!
+      SUBROUTINE Init_Lite_Data_Object( am_I_Root, NOBS,Object_Lite_Data
+     &    , RC )
+!
+! !USES:
+!
+      USE GIGC_ErrCode_Mod                         ! Error codes
+
+!
+! !INPUT PARAMETERS:
+!
+      LOGICAL,        INTENT(IN)    :: am_I_Root   ! Is this the root CPU?
+      INTEGER,        INTENT(IN)    :: NOBS        ! # number of obs in file
+!
+! !INPUT/OUTPUT PARAMETERS:
+!
+      TYPE(Lite_Data_Object), INTENT(INOUT) :: Object_Lite_Data   ! Obj for meteorology state
+!
+! !OUTPUT PARAMETERS:
+!
+      INTEGER,        INTENT(OUT)   :: RC          ! Return code
+!
+! !REMARKS:
+!  For consistency, maybe this should be moved to a different module.
+!
+! !REVISION HISTORY:
+!  19 Oct 2012 - R. Yantosca - Initial version, based on gc_environment_mod.F90
+!  19 Oct 2012 - R. Yantosca - Now pass all dimensions as arguments
+!  23 Oct 2012 - R. Yantosca - Now allocate QI, QL fields
+!  15 Nov 2012 - M. Payer    - Added all remaining met fields
+!  16 Nov 2012 - R. Yantosca - Now zero all fields after allocating
+!  27 Nov 2012 - R. Yantosca - Now allocate SUNCOS fields (IM,JM)
+!  12 Dec 2012 - R. Yantosca - Now allocate the IREG, ILAND, IUSE fields
+!  13 Dec 2012 - R. Yantosca - Now allocate the XLAI, XLAI2 fields
+!  07 Mar 2013 - R. Yantosca - Now allocate PF*LSAN, PF*CU fields properly
+!                              for GEOS-5.7.x met (they are edged)
+!  26 Sep 2013 - R. Yantosca - Renamed GEOS_57 Cpp switch to GEOS_FP
+!EOP
+!------------------------------------------------------------------------------
+!BOC
+!
+! !LOCAL VARIABLES:
+!
+      INTEGER :: LX
+
+      ! Assume success
+       RC = GIGC_SUCCESS
+
+       PRINT *,'Initializing Lite Data Object....with ',NOBS,' obs'
+
+      !=======================================================================
+      ! Allocate Fields
+      !=======================================================================
+      ALLOCATE(Object_Lite_Data%LATITUDE (NOBS), STAT=RC )
+      IF ( RC /= GIGC_SUCCESS ) RETURN
+      Object_Lite_Data%LATITUDE   = 0
+
+      ALLOCATE(Object_Lite_Data%LONGITUDE (NOBS), STAT=RC )
+      IF ( RC /= GIGC_SUCCESS ) RETURN
+      Object_Lite_Data%LONGITUDE   = 0
+
+      ALLOCATE(Object_Lite_Data%XCO2_MODEL (NOBS), STAT=RC )
+      IF ( RC /= GIGC_SUCCESS ) RETURN
+      Object_Lite_Data%XCO2_MODEL   = 0
+
+      ALLOCATE(Object_Lite_Data%XCO2FREETROP_MODEL (NOBS), STAT=RC )
+      IF ( RC /= GIGC_SUCCESS ) RETURN
+      Object_Lite_Data%XCO2FREETROP_MODEL   = 0
+
+      ALLOCATE(Object_Lite_Data%XCO2PBL_MODEL (NOBS), STAT=RC )
+      IF ( RC /= GIGC_SUCCESS ) RETURN
+      Object_Lite_Data%XCO2PBL_MODEL   = 0
+
+      ALLOCATE(Object_Lite_Data%XCO2_OBSERVED (NOBS), STAT=RC )
+      IF ( RC /= GIGC_SUCCESS ) RETURN
+      Object_Lite_Data%XCO2_OBSERVED   = 0
+
+      ALLOCATE(Object_Lite_Data%XCO2_UNCERTAINTY (NOBS), STAT=RC )
+      IF ( RC /= GIGC_SUCCESS ) RETURN
+      Object_Lite_Data%XCO2_UNCERTAINTY   = 0
+
+      ALLOCATE(Object_Lite_Data%XCO2PBL_OBSERVED (NOBS), STAT=RC )
+      IF ( RC /= GIGC_SUCCESS ) RETURN
+      Object_Lite_Data%XCO2PBL_OBSERVED   = 0
+
+      ALLOCATE(Object_Lite_Data%XCO2PBL_UNCERTAINTY (NOBS), STAT=RC )
+      IF ( RC /= GIGC_SUCCESS ) RETURN
+      Object_Lite_Data%XCO2PBL_UNCERTAINTY   = 0
+
+      ALLOCATE(Object_Lite_Data%XCO2FREETROP_OBSERVED (NOBS), STAT=RC )
+      IF ( RC /= GIGC_SUCCESS ) RETURN
+      Object_Lite_Data%XCO2FREETROP_OBSERVED   = 0
+
+      ALLOCATE(Object_Lite_Data%XCO2FREETROP_UNCERTAINTY (NOBS),STAT=RC)
+      IF ( RC /= GIGC_SUCCESS ) RETURN
+      Object_Lite_Data%XCO2FREETROP_UNCERTAINTY   = 0
+
+      ALLOCATE(Object_Lite_Data%TIME (NOBS), STAT=RC )
+      IF ( RC /= GIGC_SUCCESS ) RETURN
+      Object_Lite_Data%TIME   = 0
+
+      ALLOCATE(Object_Lite_Data%SOUNDING_ID (NOBS), STAT=RC )
+      IF ( RC /= GIGC_SUCCESS ) RETURN
+      Object_Lite_Data%SOUNDING_ID   = 0
+
+      END SUBROUTINE Init_Lite_Data_Object
+!EOC
+!------------------------------------------------------------------------------
+!          Harvard University Atmospheric Chemistry Modeling Group            !
+!------------------------------------------------------------------------------
+!BOP
+!
+! !IROUTINE: Cleanup_Carbontracker_In
+!
+! !DESCRIPTION: Subroutine CLEANUP\_GIGC\_STATE\_MET allocates all fields
+!  of the Grid-Independent GEOS-Chem (aka "GIGC") Meteorology State object.
+!\\
+!\\
+! !INTERFACE:
+!
+      SUBROUTINE Cleanup_Lite_Data( am_I_Root, Object_Lite_Data, RC )
+!
+! !USES:
+!
+      USE GIGC_ErrCode_Mod                         ! Error codes
+!
+! !INPUT PARAMETERS:
+!
+      LOGICAL,        INTENT(IN)    :: am_I_Root   ! Is this the root CPU?
+!
+! !INPUT/OUTPUT PARAMETERS:
+!
+      TYPE(Lite_Data_Object), INTENT(INOUT) :: Object_Lite_Data   ! Obj for meteorology state
+!
+! !OUTPUT PARAMETERS:
+!
+      INTEGER,        INTENT(OUT)   :: RC          ! Return code
+!
+! !REVISION HISTORY:
+!  19 Oct 2012 - R. Yantosca - Initial version, based on gc_environment_mod.F90
+!  23 Oct 2012 - R. Yantosca - Now deallocate QI, QL fields
+!  15 Nov 2012 - M. Payer    - Added all remaining met fields
+!  19 Nov 2012 - R. Yantosca - Segregate DEALLOCATE statements w/ #ifdefs
+!                              for each met field data product type
+!  27 Nov 2012 - R. Yantosca - Now deallocate the SUNCOS fields
+!  12 Dec 2012 - R. Yantosca - Now deallocate the IREG, ILAND, IUSE fields
+!  26 Sep 2013 - R. Yantosca - Renamed GEOS_57 Cpp switch to GEOS_FP
+!EOP
+!------------------------------------------------------------------------------
+!BOC
+!
+      ! Return success
+      RC = GIGC_SUCCESS
+
+
+      IF ( ASSOCIATED( Object_Lite_Data%LATITUDE       )) THEN 
+            DEALLOCATE( Object_Lite_Data%LATITUDE       )
+      ENDIF
+
+      IF ( ASSOCIATED( Object_Lite_Data%LONGITUDE       )) THEN
+            DEALLOCATE( Object_Lite_Data%LONGITUDE      )
+      ENDIF
+
+      IF ( ASSOCIATED( Object_Lite_Data%TIME       )) THEN
+            DEALLOCATE( Object_Lite_Data%TIME       )
+      ENDIF
+
+      IF ( ASSOCIATED( Object_Lite_Data%SOUNDING_ID       )) THEN
+            DEALLOCATE( Object_Lite_Data%SOUNDING_ID     )
+      ENDIF
+
+      IF ( ASSOCIATED( Object_Lite_Data%XCO2_MODEL       )) THEN
+            DEALLOCATE( Object_Lite_Data%XCO2_MODEL       )
+      ENDIF
+
+      IF ( ASSOCIATED( Object_Lite_Data%XCO2FREETROP_MODEL       )) THEN
+            DEALLOCATE( Object_Lite_Data%XCO2FREETROP_MODEL      )
+      ENDIF
+      IF ( ASSOCIATED( Object_Lite_Data%XCO2PBL_MODEL       )) THEN
+            DEALLOCATE( Object_Lite_Data%XCO2PBL_MODEL       )
+      ENDIF
+
+      IF ( ASSOCIATED( Object_Lite_Data%XCO2_OBSERVED       )) THEN
+            DEALLOCATE( Object_Lite_Data%XCO2_OBSERVED      )
+      ENDIF
+
+      IF ( ASSOCIATED( Object_Lite_Data%XCO2_UNCERTAINTY       )) THEN
+            DEALLOCATE( Object_Lite_Data%XCO2_UNCERTAINTY     )
+      ENDIF
+
+      IF ( ASSOCIATED( Object_Lite_Data%XCO2FREETROP_OBSERVED    )) THEN
+            DEALLOCATE( Object_Lite_Data%XCO2FREETROP_OBSERVED      )
+      ENDIF
+
+      IF ( ASSOCIATED( Object_Lite_Data%XCO2FREETROP_UNCERTAINTY )) THEN
+            DEALLOCATE( Object_Lite_Data%XCO2FREETROP_UNCERTAINTY     )
+      ENDIF
+      IF ( ASSOCIATED( Object_Lite_Data%XCO2PBL_OBSERVED       )) THEN
+            DEALLOCATE( Object_Lite_Data%XCO2PBL_OBSERVED      )
+      ENDIF
+
+      IF ( ASSOCIATED( Object_Lite_Data%XCO2PBL_UNCERTAINTY     )) THEN
+            DEALLOCATE( Object_Lite_Data%XCO2PBL_UNCERTAINTY     )
+      ENDIF
+
+      END SUBROUTINE Cleanup_Lite_Data
 !------------------------------------------------------------------------------
 !          Harvard University Atmospheric Chemistry Modeling Group            !
 !------------------------------------------------------------------------------
