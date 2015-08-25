@@ -30,7 +30,7 @@ module ncCooardsFormat
 
     contains
 
- subroutine ncGOSATOutputCreate(filename, nSoundings, sounding_id,xco2_obs,xco2_uncert,   &
+ subroutine ncGOSATOutputCreate(filename, nSoundings, xco2_latitude,xco2_longitude,sounding_id,xco2_obs,xco2_uncert,   &
                  xco2pbl_obs,xco2pbl_uncert,xco2ft_obs,xco2ft_uncert,varName1,varName2,varName3)
 ! subroutine ncGOSATOutputCreate(filename, nSoundings, sounding_id,varName)
         !   This subroutine creates a file to hold timeseries data for multiple stations.
@@ -43,9 +43,9 @@ module ncCooardsFormat
         !   Need to add stationName to the argument list when ready
             integer                  :: soundingDimID, nSoundings
             integer                  :: sVarID2 ,sVarID3,sVarID4
-            integer                  :: sVarID5 ,sVarID6,sVarID7,sVarID8
+            integer                  :: sVarID5 ,sVarID6,sVarID7,sVarID8,sVarID9,sVarID10
             integer*8,dimension(:)   :: sounding_id
-            real*8, dimension(:)       :: xco2_obs,xco2_uncert
+            real*8, dimension(:)       :: xco2_latitude,xco2_longitude,xco2_obs,xco2_uncert
             real*8, dimension(:)       :: xco2pbl_obs,xco2pbl_uncert
             real*8, dimension(:)       :: xco2ft_obs,xco2ft_uncert            
 
@@ -66,6 +66,12 @@ module ncCooardsFormat
             call handleError(nf90_def_dim(gosatOutputNCID, "soundings", nSoundings, soundingDimID))
             
             ! Define Variables
+            call handleError(nf90_def_var(ncid=gosatOutputNCID, name="latitude", xtype=nf90_double, &
+                 dimids=soundingDimID, varid=sVarID9))
+
+            call handleError(nf90_def_var(ncid=gosatOutputNCID, name="longitude", xtype=nf90_double, &
+                 dimids=soundingDimID, varid=sVarID10))
+
             call handleError(nf90_def_var(gosatOutputNCID, "sounding_id", nf90_uint64, soundingDimID, &
                  sVarID2))
            
@@ -120,6 +126,9 @@ module ncCooardsFormat
             call handleError(nf90_put_var(gosatOutputNCID, sVarID7, xco2ft_obs))
             call handleError(nf90_put_var(gosatOutputNCID, sVarID8, xco2ft_uncert))
 
+            call handleError(nf90_put_var(gosatOutputNCID, sVarID9, xco2_latitude))
+            call handleError(nf90_put_var(gosatOutputNCID, sVarID10, xco2_longitude))
+
             ! Sync the file to make sure data is saved
             call handleError(nf90_sync(gosatOutputNCID))
 
@@ -164,7 +173,7 @@ module ncCooardsFormat
 
         end subroutine ncGOSATOutputClose
 
- subroutine ncCTOutputCreate(filename, nSoundings, sounding_id,xco2_obs,xco2_uncert,   &
+ subroutine ncCTOutputCreate(filename, nSoundings,sounding_id,xco2_obs,xco2_uncert,   &
                  xco2pbl_obs,xco2pbl_uncert,xco2ft_obs,xco2ft_uncert,varName1,varName2,varName3)
 ! subroutine ncGOSATOutputCreate(filename, nSoundings, sounding_id,varName)
         !   This subroutine creates a file to hold timeseries data for multiple stations.
@@ -200,6 +209,7 @@ module ncCooardsFormat
             call handleError(nf90_def_dim(ctOutputNCID, "soundings", nSoundings, soundingDimID))
 
             ! Define Variables
+
             call handleError(nf90_def_var(ctOutputNCID, "sounding_id", nf90_char, soundingDimID, &
                  sVarID2))
 
@@ -437,7 +447,10 @@ module ncCooardsFormat
             !print *,'defined dims'
          DO i = 1,nVars
             !print *,'nVars:',i,'varID:',varID
-            call handleError(nf90_def_var(fileNCID, varName(i), nf90_float, dimids, varID, & 
+            !Testing doubleprecision
+            !call handleError(nf90_def_var(fileNCID, varName(i), nf90_float, dimids, varID, & 
+            !            deflate_level=deflatelevel)) !,chunksizes=(/ nLon, nLat, 1, 1 /)))
+            call handleError(nf90_def_var(fileNCID, varName(i), nf90_double, dimids, varID, &
                         deflate_level=deflatelevel)) !,chunksizes=(/ nLon, nLat, 1, 1 /)))
             !print *,'defined ',varName(i)
             ! Define Attributes

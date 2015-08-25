@@ -28,6 +28,7 @@
          MODULE PROCEDURE Ncrd_1d_R8
          MODULE PROCEDURE Ncrd_1d_R4
          MODULE PROCEDURE Ncrd_1d_Int
+         MODULE PROCEDURE Ncrd_1d_Int8
          MODULE PROCEDURE Ncrd_1d_Char
          MODULE PROCEDURE Ncrd_2d_R8
          MODULE PROCEDURE Ncrd_2d_R4
@@ -382,6 +383,8 @@ CONTAINS
       integer             :: ierr
       integer             :: varid
 !
+      print *,'entering Ncrd_1d_Int...'
+
       ierr = Nf_Inq_Varid (ncid, varname, varid)
 
       if (ierr /= NF_NOERR) then
@@ -401,6 +404,78 @@ CONTAINS
       return
 
       end subroutine Ncrd_1d_Int
+!EOC
+!-------------------------------------------------------------------------
+!BOP
+!
+! !IROUTINE: Ncrd_1d_Int8
+!
+! !INTERFACE:
+!
+      subroutine Ncrd_1d_Int8 (varrd_1di, ncid, varname, strt1d, cnt1d)
+!
+! !USES:
+!
+      use m_do_err_out
+!
+      implicit none
+!
+      include "netcdf.inc"
+!
+! !INPUT PARAMETERS:
+!
+!!    ncid     : netCDF file id to read array input data from
+!!    varname  : netCDF variable name for array
+!!    strt1d   : vector specifying the index in varrd_1di where
+!!               the first of the data values will be read
+!!    cnt1d    : varrd_1di dimension
+      integer          , intent(in)   :: ncid
+      character (len=*), intent(in)   :: varname
+      integer          , intent(in)   :: strt1d(1)
+      integer          , intent(in)   :: cnt1d (1)
+!
+! !OUTPUT PARAMETERS:
+!!    varrd_1di : intger array to fill
+      integer*8        , intent(out)  :: varrd_1di(cnt1d(1))
+!
+! !DESCRIPTION: Reads in a 1D netCDF integer array and does some error
+!  checking.
+!\\
+!\\
+! !AUTHOR:
+!  John Tannahill (LLNL) and Jules Kouatchou
+!
+! !REVISION HISTORY:
+!  Initial code.
+!EOP
+!-------------------------------------------------------------------------
+!BOC
+!
+! !LOCAL VARIABLES:
+      character (len=128) :: err_msg
+      integer             :: ierr
+      integer             :: varid
+!
+      ierr = Nf_Inq_Varid (ncid, varname, varid) 
+
+      print *,'entering Ncrd_1d_Int8...'
+      if (ierr /= NF_NOERR) then
+        err_msg = 'In Ncrd_1d_Int8 #1:  ' // Trim (varname) // &
+                  ', ' // Nf_Strerror (ierr)
+        call Do_Err_Out (err_msg, .true., 1, ncid, 0, 0, 0.0d0, 0.0d0)
+      end if
+
+
+      ierr = Nf_Get_Vara_Int (ncid, varid, strt1d, cnt1d, varrd_1di)
+
+      if (ierr /= NF_NOERR) then
+        err_msg = 'In Ncrd_1d_Int8 #2:  ' // Nf_Strerror (ierr)
+        call Do_Err_Out (err_msg, .true., 2, ncid, varid, 0, 0.0d0, 0.0d0)
+      end if
+
+      return
+
+      end subroutine Ncrd_1d_Int8
 !EOC
 !-------------------------------------------------------------------------
 !BOP
