@@ -30,7 +30,7 @@ module ncCooardsFormat
 
     contains
 
- subroutine ncGOSATOutputCreate(filename, nSoundings, xco2_latitude,xco2_longitude,sounding_id,xco2_obs,xco2_uncert,   &
+subroutine ncGOSATOutputCreate(filename, nSoundings,xco2_cloudheight,xco2_latitude,xco2_longitude,sounding_id,xco2_obs,xco2_uncert,   &
                  xco2pbl_obs,xco2pbl_uncert,xco2ft_obs,xco2ft_uncert,varName1,varName2,varName3)
 ! subroutine ncGOSATOutputCreate(filename, nSoundings, sounding_id,varName)
         !   This subroutine creates a file to hold timeseries data for multiple stations.
@@ -43,41 +43,46 @@ module ncCooardsFormat
         !   Need to add stationName to the argument list when ready
             integer                  :: soundingDimID, nSoundings
             integer                  :: sVarID2 ,sVarID3,sVarID4
-            integer                  :: sVarID5 ,sVarID6,sVarID7,sVarID8,sVarID9,sVarID10
+            integer                  :: sVarID5 ,sVarID6,sVarID7,sVarID8,sVarID9,sVarID10,sVarID11
             integer*8,dimension(:)   :: sounding_id
             real*8, dimension(:)       :: xco2_latitude,xco2_longitude,xco2_obs,xco2_uncert
             real*8, dimension(:)       :: xco2pbl_obs,xco2pbl_uncert
-            real*8, dimension(:)       :: xco2ft_obs,xco2ft_uncert            
+            real*8, dimension(:)       :: xco2ft_obs,xco2ft_uncert
+            real*8, dimension(:)       :: xco2_cloudheight
 
             !integer, parameter :: mode_flag = IOR(nf90_hdf5, nf90_classic_model) ! | nf90_clobber
-            integer, parameter :: mode_flag = nf90_hdf5
+            integer, parameter :: mode_flag = nf90_netcdf4
 !           integer, parameter :: deflatelevel = 6
 
-            print *,'uncert:',xco2_uncert          
-            print *,'sid:',sounding_id
-            print *,'xco2:',xco2_obs
+            !print *,'uncert:',xco2_uncert
+            !print *,'sid:',sounding_id
+            !print *,'xco2:',xco2_obs
 
             ! Create file
             call handleError(nf90_create(path=trim(filename), cmode=mode_flag, ncid=gosatOutputNCID))
-           
+
             print *,'Opening/creating file ',trim(filename)
- 
+
             ! Define Dimensions
             call handleError(nf90_def_dim(gosatOutputNCID, "soundings", nSoundings, soundingDimID))
-            
+            !call handleError(nf90_def_dim(gosatOutputNCID, "soundings", nf90_unlimited, soundingDimID))
+
             ! Define Variables
+            call handleError(nf90_def_var(ncid=gosatOutputNCID, name="xco2_cloudheight", xtype=nf90_double, &
+                 dimids=soundingDimID, varid=sVarID11))
+
             call handleError(nf90_def_var(ncid=gosatOutputNCID, name="latitude", xtype=nf90_double, &
                  dimids=soundingDimID, varid=sVarID9))
 
             call handleError(nf90_def_var(ncid=gosatOutputNCID, name="longitude", xtype=nf90_double, &
                  dimids=soundingDimID, varid=sVarID10))
 
-            call handleError(nf90_def_var(gosatOutputNCID, "sounding_id", nf90_uint64, soundingDimID, &
-                 sVarID2))
-           
+            !call handleError(nf90_def_var(gosatOutputNCID, "sounding_id", nf90_uint64, soundingDimID, &
+            !     sVarID2))
+
             call handleError(nf90_def_var(ncid=gosatOutputNCID, name="xco2_observed", xtype=nf90_double, &
                  dimids=soundingDimID, varid=sVarID3))
-           
+
             call handleError(nf90_def_var(ncid=gosatOutputNCID, name="xco2_uncertainty", xtype=nf90_double, &
                  dimids=soundingDimID, varid=sVarID4))
 
@@ -117,7 +122,7 @@ module ncCooardsFormat
 
             call handleError(nf90_enddef(gosatOutputNCID))
 
-            call handleError(nf90_put_var(gosatOutputNCID, sVarID2, sounding_id))
+            !call handleError(nf90_put_var(gosatOutputNCID, sVarID2, sounding_id))
             call handleError(nf90_put_var(gosatOutputNCID, sVarID3, xco2_obs))
             call handleError(nf90_put_var(gosatOutputNCID, sVarID4, xco2_uncert))
 
@@ -128,6 +133,7 @@ module ncCooardsFormat
 
             call handleError(nf90_put_var(gosatOutputNCID, sVarID9, xco2_latitude))
             call handleError(nf90_put_var(gosatOutputNCID, sVarID10, xco2_longitude))
+            call handleError(nf90_put_var(gosatOutputNCID, sVarID11, xco2_cloudheight))
 
             ! Sync the file to make sure data is saved
             call handleError(nf90_sync(gosatOutputNCID))
@@ -558,7 +564,7 @@ module ncCooardsFormat
 
          print *,'in readgosat2'
          print *,'grp:',grp
-
+         print *,'filling nsoundings=',nsoundings
          !filename = trim(filename)
          !grp = trim(grp)
          print *,'file:',filename
@@ -582,7 +588,7 @@ module ncCooardsFormat
                       count=(/ nSoundings /) ) )
          ENDIF
          call handleError(nf90_close(ncid))
-
+          print *,'done....'
         end subroutine readGOSAT_real8
 
       subroutine readGOSAT_real4(filename, var, grp,varout, nSoundings)
@@ -687,7 +693,7 @@ module ncCooardsFormat
          !call handleError( nf90_get_var(grp_id, var_varid, varout,start=(/ 1 /),count=(/ nSoundings /) ) )
          !call handleError( nf90_get_var(grp_id, var_varid, varout,start=(/ 1 /),count=(/ nSoundings /) ) )
          call handleError( nf90_get_var(ncid, var_varid, varout,start=(/ 1 /),count=(/ nSoundings /) ) )
-         print *,'ID***:',varout
+         !print *,'ID***:',varout
          print *,'after'
          call handleError(nf90_close(ncid))
 

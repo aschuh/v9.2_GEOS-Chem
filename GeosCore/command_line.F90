@@ -10,6 +10,8 @@ SUBROUTINE PARSE_COMMAND_LINE
     INTEGER, PARAMETER :: MAX_CYCLE_DAYS = 60
     INTEGER, PARAMETER :: MAX_CYCLES = 1000
     INTEGER, PARAMETER :: MAX_RUN_DAYS = 367
+    INTEGER, PARAMETER :: MAX_PFT = 25
+    INTEGER, PARAMETER :: MAX_HARMONIC = 6
 
     ARG_COUNT = COMMAND_ARGUMENT_COUNT()
 
@@ -27,11 +29,13 @@ SUBROUTINE PARSE_COMMAND_LINE
         CALL PRINT_USAGE(FULL = .TRUE.)
     END IF
 
-    IF(ARG_COUNT /= 5 .and. ARG_COUNT /= 6) CALL PRINT_USAGE
+    IF(ARG_COUNT /= 5 .and. ARG_COUNT /= 6 .and. ARG_COUNT /= 7) CALL PRINT_USAGE
 
     SELECT CASE (ARG_COUNT)
 
        CASE (5)
+
+         PRINT *,'Running standard configuration with no lag....'
 
          READ(ARG, *) ENUMBER
          IF (ENUMBER == 0) THEN
@@ -86,6 +90,8 @@ SUBROUTINE PARSE_COMMAND_LINE
          PRINT *, ""
 
       CASE (6)
+
+        PRINT *,'Running standard configuration with lag....'
 
         READ(ARG, *) ENUMBER
          IF (ENUMBER == 0) THEN
@@ -145,6 +151,64 @@ SUBROUTINE PARSE_COMMAND_LINE
          ENDIF
 
          PRINT *, ""
+
+      CASE (7)
+
+        PRINT *,'Running special configuration with harmonic coefficients....'
+
+        !-- Start date
+        READ(ARG, *) START_DATE
+         CALL SET_BEGIN_TIME(START_DATE, 0)
+         PRINT *, "Cycle start date =", START_DATE
+ 
+         ! run length in days
+         CALL GET_COMMAND_ARGUMENT(2, ARG)
+         READ(ARG, *) DAYS
+         IF (0 < DAYS .AND. DAYS <= MAX_RUN_DAYS) THEN
+             CALL INCREMENT_DATE(START_DATE, DAYS, END_DATE)
+             CALL SET_END_TIME(END_DATE, 0)
+             PRINT *, "Run end date   =", END_DATE
+         ELSE
+             STOP "Bad run length count (days)"
+         END IF
+
+         ! cycle length in days
+         CALL GET_COMMAND_ARGUMENT(3, ARG)
+         READ(ARG, *) CYCLE_LEN
+         !IF (0 > DAYS .OR. DAYS > MAX_CYCLE_DAYS) THEN
+         IF (0 > DAYS .OR. DAYS > MAX_RUN_DAYS) THEN
+             STOP "Bad cycle count"
+         END IF
+
+         ! cycle length in days
+         CALL GET_COMMAND_ARGUMENT(4, ARG)
+         READ(ARG, *) FLUX_TYPE
+         !IF (0 > DAYS .OR. DAYS > MAX_CYCLE_DAYS) THEN
+         IF (0 > FLUX_TYPE .OR. FLUX_TYPE > 1) THEN
+             STOP "Bad Flux Type (0:Resp, 1:GPP)"
+         END IF
+
+         ! cycle length in days
+         CALL GET_COMMAND_ARGUMENT(5, ARG)
+         READ(ARG, *) HARMONIC 
+         IF (0 > HARMONIC .OR. HARMONIC > MAX_HARMONIC) THEN
+             STOP "Bad harmonic"
+         END IF
+
+         ! cycle length in days
+         CALL GET_COMMAND_ARGUMENT(6, ARG)
+         READ(ARG, *) PFT
+         IF (0 > PFT .OR. PFT > MAX_PFT) THEN
+             STOP "Bad pft number"
+         END IF
+
+         ! cycle length in days
+         CALL GET_COMMAND_ARGUMENT(7, ARG)
+         READ(ARG, *) TRANSCOM_REGION
+         !IF (0 > DAYS .OR. DAYS > MAX_CYCLE_DAYS) THEN
+         IF (0 > TRANSCOM_REGION .OR. TRANSCOM_REGION > 22) THEN
+             STOP "Bad transcom number"
+         END IF         
 
      END SELECT
 
