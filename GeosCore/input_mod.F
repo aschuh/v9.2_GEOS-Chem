@@ -377,7 +377,7 @@
             CALL READ_DIAGNOSTIC_MENU( am_I_Root, Input_Opt, RC )             
             SEEN_DIAGNOSTIC_MENU = .TRUE.
 
-         ELSE IF ( INDEX( LINE, 'GOSAT MENU' ) > 0 ) THEN
+         ELSE IF ( INDEX( LINE, 'SATELLITE CO2 MENU' ) > 0 ) THEN
             CALL READ_GOSAT_MENU
 
          ELSE IF ( INDEX( LINE, 'ASCENDS MENU' ) > 0 ) THEN
@@ -1069,12 +1069,19 @@
       ! (bmy, 12/6/12)
       !-----------------------------------------------------------------
 
-      IF (.NOT. LENKF) THEN
-          ! Set start time of run in "time_mod.f"
-          CALL SET_BEGIN_TIME( NYMDb, NHMSb )
-          ! Set end time of run in "time_mod.f"
-          CALL SET_END_TIME( NYMDe, NHMSe )
-      END IF
+      !--  *************
+      !I'm confused to why the following lines are here?  Andrew Schuh
+
+      !IF (.NOT. LENKF) THEN
+      !    PRINT *,'NOT LENKF'
+      !    STOP
+      !    ! Set start time of run in "time_mod.f"
+      !    CALL SET_BEGIN_TIME( NYMDb, NHMSb )
+      !    ! Set end time of run in "time_mod.f"
+      !    CALL SET_END_TIME( NYMDe, NHMSe )
+      !END IF
+      !-- ****************
+
 
       ! Set start time of run in "time_mod.f"
       CALL SET_BEGIN_TIME( NYMDb, NHMSb )
@@ -5480,7 +5487,7 @@
       IU_BPCH = findFreeLUN()
 
       ! Open the binary punch file for output
-      CALL OPEN_BPCH2_FOR_WRITE( IU_BPCH, BPCH_FILE )
+      !CALL OPEN_BPCH2_FOR_WRITE( IU_BPCH, BPCH_FILE )
 
       END SUBROUTINE READ_DIAGNOSTIC_MENU
 !EOC
@@ -5695,8 +5702,11 @@
       USE GOSAT_MOD,       ONLY : SET_GOSAT
       USE CMN_SIZE_MOD             ! MAXFAM
       USE CMN_DIAG_MOD             ! ND80
-      USE ENKF_MOD,        ONLY : LENKF, ENUMBER, RERUN
+      USE ENKF_MOD,        ONLY : LLAG,LENKF, ENUMBER, RERUN
       USE CHARPAK_MOD,     ONLY : STRREPL
+
+      USE ENKF_MOD,        ONLY :  FLUX_TYPE, HARMONIC
+      USE ENKF_MOD,        ONLY :  PFT, TRANSCOM_REGION
 
 !
 ! !REVISION HISTORY:
@@ -5710,10 +5720,12 @@
 !
       LOGICAL            :: DO_GOSAT
       INTEGER            :: N
+      INTEGER            :: VERTOPT
       CHARACTER(LEN=255) :: IFILE
       CHARACTER(LEN=255) :: OFILE
       CHARACTER(LEN=255) :: SUBSTRS(MAXDIM), MSG
-      CHARACTER(LEN=4)  :: CENUMBER
+      CHARACTER(LEN=4)   :: CENUMBER
+      CHARACTER(LEN=10)  ::  sffx ! format descriptor
 
       !=================================================================
       ! READ_GOSAT_MENU begins here!
@@ -5735,6 +5747,14 @@
       CALL SPLIT_ONE_LINE( SUBSTRS, N, 1,  'read_gosat_menu:1' )
       READ( SUBSTRS(1:N), * ) DO_GOSAT
 
+      IF (  LENKF .and. RERUN .and. LLAG ) THEN
+        DO_GOSAT = .TRUE.
+      ENDIF
+
+      IF (  LENKF .and. ( .not. RERUN ) .and. LLAG ) THEN
+        DO_GOSAT = .FALSE.
+      ENDIF
+
       ! Set ND80 flag from DO_GOSAT
       IF ( DO_GOSAT ) ND80 = 1
 
@@ -5745,6 +5765,17 @@
       ! Output file name
       CALL SPLIT_ONE_LINE( SUBSTRS, N, 1,  'read_gosat_menu:3' )
       READ( SUBSTRS(1:N), '(a)' ) OFILE
+
+      ! Averaging in vertical options
+      CALL SPLIT_ONE_LINE( SUBSTRS, N, 1,  'read_gosat_menu:4' )
+      READ( SUBSTRS(1:N), * ) VERTOPT
+
+      !-- Temp fix for PFT
+       write (sffx, "(A1,I1.1,A1,I1.1,A1,I2.2,A1,I2.2)") '_',FLUX_TYPE,
+     &        '_',HARMONIC,'_',PFT,'_',TRANSCOM_REGION
+
+      PRINT *,'This needs to be coded right....'
+      OFILE = TRIM(OFILE) // sffx // '.nc'
 
       IF ( LENKF ) THEN
         write(CENUMBER, '(i4.4)') ENUMBER
@@ -5767,17 +5798,20 @@
       WRITE( 6, 100     ) 'Turn on gosat diag?   : ', DO_GOSAT
       WRITE( 6, 110     ) 'Flight track input file     : ', TRIM(IFILE)
       WRITE( 6, 110     ) 'Output file name            : ', TRIM(OFILE)
+      WRITE( 6, 120     ) 'Vertical avg option:          ',VERTOPT
 
       ! FORMAT statements
  100  FORMAT( A, L5    )
  110  FORMAT( A, A     )
-
+ 120  FORMAT( A, I5    )
       !=================================================================
       ! Call setup routines from other F90 modules
       !=================================================================
 
+
+      PRINT *,'PREVAL VERTOPT:',VERTOPT
       ! Pass variables to "planeflight_mod.f"
-      CALL SET_GOSAT( DO_GOSAT, IFILE, OFILE )
+      CALL SET_GOSAT( DO_GOSAT, IFILE, OFILE, VERTOPT )
 
       END SUBROUTINE READ_GOSAT_MENU
 !EOC

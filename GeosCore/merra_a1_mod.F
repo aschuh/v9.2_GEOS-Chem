@@ -154,7 +154,7 @@
 !
 ! !INPUT PARAMETERS: 
 !
-      INTEGER,        INTENT(IN)            :: NYMD      ! YYYYMMDD date
+      INTEGER                               :: NYMD      ! YYYYMMDD date
       INTEGER,        INTENT(IN)            :: NHMS      ! hhmmss time
       TYPE(OptInput), INTENT(IN)            :: Input_Opt ! Input Options
       LOGICAL,        INTENT(IN),  OPTIONAL :: RESET     ! Reset first A1 flag?
@@ -202,9 +202,15 @@
          ! Initialization
          !---------------------------
 
+      ! Hack for a missing file
+      !IF ( NYMD == 20141225 ) THEN
+      !    NYMD = 20141224
+      !ENDIF
+
          ! Strings for directory & filename
          GEOS_DIR = TRIM( Input_Opt%MERRA_DIR )
          A1_FILE  = 'YYYYMMDD.a1.' // GET_RES_EXT()
+
 
          ! Replace date tokens
          CALL EXPAND_DATE( A1_FILE,  NYMD, NHMS )
@@ -292,7 +298,7 @@
 !
 ! !INPUT PARAMETERS: 
 !
-      INTEGER,        INTENT(IN)    :: NYMD        ! YYYYMMDD and 
+      INTEGER,        INTENT(INOUT)    :: NYMD        ! YYYYMMDD and 
       INTEGER,        INTENT(IN)    :: NHMS        !  hhmmss of data to read
 !
 ! !INPUT/OUTPUT PARAMETERS:
@@ -319,12 +325,19 @@
       !=================================================================
 
       ! Skip over previously-read A-3 fields
-      IF ( NYMD == LASTNYMD .and. NHMS == LASTNHMS ) THEN
+      IF ( NYMD == LASTNYMD .and. 
+     &      NHMS == LASTNHMS ) THEN
          WRITE( 6, 100 ) NYMD, NHMS
- 100     FORMAT( '     - A-3 met fields for NYMD, NHMS = ', 
+ 100     FORMAT( '     - A-1 met fields for NYMD, NHMS = ', 
      &           i8.8, 1x, i6.6, ' have been read already' ) 
          RETURN
       ENDIF
+
+        ! Hack for a missing file
+        !IF ( NYMD == 20141225 ) THEN
+        !  NYMD = 20141224
+        !ENDIF
+
 
       !=================================================================      
       ! Read data from disk

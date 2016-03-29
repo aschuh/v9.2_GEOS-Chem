@@ -175,10 +175,10 @@
       SIM_NAME = GET_SIM_NAME()
 
       ! Write "diaginfo.dat" file
-      CALL CREATE_DINFO()
+      !CALL CREATE_DINFO()
 
       ! Write "tracerinfo.dat" file
-      CALL CREATE_TINFO( am_I_Root, Input_Opt, RC )
+      !CALL CREATE_TINFO( am_I_Root, Input_Opt, RC )
 
       ! Deallocate variables
       CALL CLEANUP_GAMAP

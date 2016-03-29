@@ -143,7 +143,8 @@
 !
 ! !INPUT PARAMETERS: 
 !
-      INTEGER,        INTENT(IN) :: NYMD        ! YYYYMMDD and hhmmss
+      INTEGER                    :: NYMD        ! YYYYMMDD and hhmmss
+      INTEGER                    :: NYMD2        ! YYYYMMDD and hhmmss
       INTEGER,        INTENT(IN) :: NHMS        !  to test for A3 file open
       TYPE(OptInput), INTENT(IN) :: Input_Opt   ! Input Options object
 ! 
@@ -181,9 +182,21 @@
          GEOS_DIR = TRIM( Input_Opt%MERRA_DIR )
          A3_FILE  = 'YYYYMMDD.a3.' // GET_RES_EXT()
 
+        !---  *************
+        ! Hack for a missing file
+        IF ( NYMD == 20151003 ) THEN
+           PRINT *,'changing NYMD'
+           NYMD2 = 20151002
+        ELSEIF ( NYMD == 20141225 ) THEN
+           NYMD2 = 20141226
+        ELSE
+           NYMD2 = NYMD
+        ENDIF
+        !---   ***************
+
          ! Replace date tokens
-         CALL EXPAND_DATE( GEOS_DIR, NYMD, NHMS )
-         CALL EXPAND_DATE( A3_FILE,  NYMD, NHMS )
+         CALL EXPAND_DATE( GEOS_DIR, NYMD2, NHMS )
+         CALL EXPAND_DATE( A3_FILE,  NYMD2, NHMS )
 
          ! Full file path
          PATH = TRIM( Input_Opt%DATA_DIR ) // 
@@ -263,7 +276,8 @@
 !
 ! !INPUT PARAMETERS: 
 !
-      INTEGER,        INTENT(IN)    :: NYMD        ! YYYYMMDD and
+      INTEGER,     INTENT(INOUT)    :: NYMD
+      INTEGER                       :: NYMD2  ! YYYYMMDD and
       INTEGER,        INTENT(IN)    :: NHMS        !  hhmmss of desired data
       TYPE(OptInput), INTENT(IN)    :: Input_Opt   ! Input Options object
 !
@@ -291,6 +305,8 @@
       ! Initialization
       !=================================================================
 
+      !PRINT *,'WTF is NYMD:',NYMD,' LASTNYMD:',LASTNYMD
+
       ! Skip over previously-read A-6 fields
       IF ( NYMD == LASTNYMD .and. NHMS == LASTNHMS ) THEN
          WRITE( 6, 100 ) NYMD, NHMS
@@ -304,10 +320,22 @@
       !=================================================================
       IF ( Input_Opt%ITS_A_SPECIALTY_SIM ) THEN
 
+        !---  *************
+        ! Hack for a missing file
+        IF ( NYMD == 20151003 ) THEN
+           PRINT *,'changing NYMD'
+           NYMD2 = 20151002
+        ELSEIF ( NYMD == 20141225 ) THEN
+           NYMD2 = 20141226
+        ELSE
+           NYMD2 = NYMD
+        ENDIF
+        !---   ***************
+
          !--------------------------------------------------------------
          ! SPECIALTY SIMULATIONS: Make sure to read T_FULLGRID
          !--------------------------------------------------------------
-         CALL READ_A3( NYMD       = NYMD,          
+         CALL READ_A3( NYMD       = NYMD2,          
      &                 NHMS       = NHMS,       
      &                 CLOUD      = State_Met%CLDF,          
      &                 CLDTOPS    = State_Met%CLDTOPS, 

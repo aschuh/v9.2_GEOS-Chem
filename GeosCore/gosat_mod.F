@@ -20,6 +20,7 @@
 
       IMPLICIT NONE
       PRIVATE
+     
 !
 ! !PUBLIC MEMBER FUNCTIONS:
 !
@@ -109,6 +110,7 @@
       REAL,  POINTER       :: LATITUDE     (:  )
       REAL,  POINTER       :: LONGITUDE     (:  )
       REAL,  POINTER       :: TIME       (:  )
+      REAL,  POINTER       :: XCO2_CLOUDHEIGHT (: )
 
       END TYPE LITE_DATA_OBJECT
 
@@ -131,6 +133,7 @@
       ! PLON        : Array of longitude at each flight point
       ! PPRESS      : Array of pressure  at each flight point
       ! PTYPE       : Array of ID'#S     at each flight point
+      ! PPRESSWGHT  : Array of pressure weights at each point
       ! NPVAR       : # of var's to be saved at each flight point
       ! PVAR        : Array of variable indices
       ! PNAME       : Array of variable names corresponding to PVAR
@@ -148,7 +151,7 @@
 
       ! Parameters
       INTEGER,           PARAMETER   :: MAXVARS   = 200
-      INTEGER,           PARAMETER   :: MAXPOINTS = 10000
+      INTEGER,           PARAMETER   :: MAXPOINTS = 200000
       INTEGER,           PARAMETER   :: MAXREAC   = 50
       INTEGER,           PARAMETER   :: MAXRO2    = 45
       INTEGER,           PARAMETER   :: MAXAN     = 10 ! FP 04/01/2010 (AN) 
@@ -172,6 +175,12 @@
       CHARACTER(LEN=5),  ALLOCATABLE :: PTYPE(:)              
       CHARACTER(LEN=14), ALLOCATABLE :: PID(:)
 
+      ! For pressure weights
+      REAL*8,            ALLOCATABLE :: PPRESSWGHT(:,:)
+      REAL*8,            ALLOCATABLE :: PAK(:,:)
+      REAL*8,            ALLOCATABLE :: POCO2_PR(:,:)
+      REAL*8,            ALLOCATABLE :: POCO2_PRESS(:,:)
+
       ! For specifying variables to save at each flight point
       INTEGER                        :: NPVAR        
       INTEGER,           ALLOCATABLE :: PVAR(:) 
@@ -193,6 +202,9 @@
       ! For specifying AN constituents at each flight point
       INTEGER                        :: NPAN
       INTEGER                        :: P_AN(MAXAN)
+
+      ! Vert Integrate Opt
+      INTEGER                        :: VERTINTOPT 
 
       ! Input/output file names
       CHARACTER(LEN=255)             :: INFILENAME,  INF
@@ -221,7 +233,7 @@
 !\\
 ! !INTERFACE:
 !
-      SUBROUTINE SETUP_GOSAT ( am_I_Root )
+      SUBROUTINE SETUP_GOSAT ( am_I_Root , Input_Opt,RC)
 !
 ! !USES:
 !
@@ -231,19 +243,24 @@
       USE TIME_MOD,   ONLY : EXPAND_DATE
       USE TIME_MOD,   ONLY : GET_NYMD
       USE TIME_MOD,   ONLY : GET_NHMS
-      USE TRACER_MOD, ONLY : ITS_A_FULLCHEM_SIM
+      USE GIGC_Input_Opt_Mod, ONLY : OptInput
       USE NCCOOARDSFORMAT, ONLY :ncGOSATOutputCreate,ncGOSATOutputClose
       USE NCCOOARDSFORMAT, ONLY :READGOSAT_ID,READGOSAT_REAL8 
+      USE NCCOOARDSFORMAT, ONLY : READGOSAT_REAL4
       USE m_netcdf_io_close
       USE m_netcdf_io_open
       USE m_netcdf_io_read
       USE m_netcdf_io_get_dimlen
       USE m_do_err_out
-
+      USE m_netcdf_io_checks
 !
 ! !INPUT PARAMETERS:
 !
       LOGICAL, INTENT(IN) :: am_I_Root   ! Is this the root CPU?
+
+! !OUTPUT PARAMETERS:
+!
+      INTEGER,        INTENT(OUT) :: RC          ! Success or failure?
 
 ! !REMARKS:
 !  For SMVGEAR or KPP simulations, the call to SETUP_GOSAT is made from 
@@ -271,20 +288,24 @@
 ! !LOCAL VARIABLES:
 !
       LOGICAL, SAVE      :: FIRST = .TRUE.
-      LOGICAL            :: IS_OPEN
+      LOGICAL            :: IS_OPEN, surfheight_TF
       INTEGER            :: I,  IP,      N,   TEMP, LENGTH
       INTEGER            :: RN, COUNTER, IOS, NYMD, NHMS
       INTEGER            :: NCID, DIM_LEN
+      INTEGER            :: st2d(2),ct2d(2),st1d(1),ct1d(1)
       INTEGER, dimension(:), allocatable :: ID4
       INTEGER*8, dimension(:), allocatable :: ID
       REAL*8, dimension(:), allocatable :: XCO2_OBS,XCO2_UNCERT
       REAL*8, dimension(:), allocatable :: XCO2PBL_OBS,XCO2PBL_UNCERT
       REAL*8, dimension(:), allocatable :: XCO2FT_OBS,XCO2FT_UNCERT
       REAL*8, dimension(:), allocatable :: XCO2_LATITUDE,XCO2_LONGITUDE
+      REAL*8, dimension(:), allocatable :: XCO2_CLOUDHEIGHT
       CHARACTER(LEN=7)   :: NAMES
       CHARACTER(LEN=20)  :: LINE
       CHARACTER(LEN=10)  :: TYPE
       
+      TYPE(OptInput), INTENT(IN)    :: Input_Opt   ! Input Options object
+
       !=================================================================
       ! SETUP_GOSAT begins here!
       !=================================================================
@@ -346,22 +367,23 @@
       CALL READ_POINTS( am_I_Root )
 
       ! Set the pointer to the first record 
+      ! Set the pointer to the first record 
       PPOINT = 1
 
       !=================================================================
       ! Find the species # for all components of RO2 (SMVGEAR only)
       !=================================================================
-      CALL RO2_SETUP
+      CALL RO2_SETUP( am_I_Root, Input_Opt, RC )
 
       !=================================================================
       ! Find the species # for all components of NOY (SMVGEAR only)
       !=================================================================
-      CALL NOY_SETUP
+      CALL NOY_SETUP( am_I_Root, Input_Opt, RC )
 
       !=================================================================
       ! Find the species # for all components of AN (SMVGEAR only)
       !=================================================================
-      CALL AN_SETUP
+      CALL AN_SETUP( am_I_Root, Input_Opt, RC )
     
       ! Fancy output
       WRITE( 6, '(a)' ) REPEAT( '=', 79 )
@@ -392,6 +414,7 @@
 
        ALLOCATE( ID4( NPOINTS ) )
        ALLOCATE( ID( NPOINTS ) )
+       ALLOCATE( XCO2_CLOUDHEIGHT (NPOINTS) )
        ALLOCATE( XCO2_OBS (NPOINTS) )
        ALLOCATE( XCO2_UNCERT (NPOINTS) )
        ALLOCATE( XCO2FT_OBS (NPOINTS) )
@@ -400,7 +423,6 @@
        ALLOCATE( XCO2PBL_UNCERT (NPOINTS) )
        ALLOCATE( XCO2_LATITUDE (NPOINTS) )
        ALLOCATE( XCO2_LONGITUDE (NPOINTS) )
-
        
       ! CALL READGOSAT_ID( trim (INF), NPOINTS, ID)
       !PRINT *,'ID1:',ID
@@ -410,84 +432,97 @@
 
       CALL Ncop_Rd( NCID, trim(INF) )
 
-      CALL Ncget_Unlim_Dimlen (NCID, DIM_LEN)
+      !CALL Ncget_Unlim_Dimlen (NCID, DIM_LEN)
+      CALL NCget_DimLen(NCID, 'sounding_id',DIM_LEN)
 
-      PRINT *,'DIM:',DIM_LEN
-      ID = 0
-      CALL Ncrd(ID, ncid, 'sounding_id', (/ 1 /), (/ DIM_LEN /))
+      !PRINT *,'DIM:',DIM_LEN
+      !PRINT *,'npoints:',npoints
+      !-- ID already grabbed earlier
+      !ID = 0
+      !CALL readGOSAT_ID(trim(INF), NPOINTS, ID)
+      !print *,'done w/ redgosat'
+      !CALL Ncrd(ID, ncid, 'sounding_id', (/ 1 /), (/ DIM_LEN /))
       !ID = INT8(ID4)
 
-      CALL Ncrd(XCO2_OBS, ncid, 'xco2_observed', (/ 1 /), (/ DIM_LEN /))
-      PRINT *,'xco2_obs:',XCO2_OBS
+      st1d = (/ 1 /)
+      ct1d = (/ NPOINTS /)
 
-      CALL Ncrd(XCO2_UNCERT, ncid, 'xco2_uncertainty', (/ 1 /),
-     &   (/ DIM_LEN /))
 
-      CALL Ncrd(XCO2FT_OBS, ncid, 'xco2freetrop_observed', (/ 1 /), 
-     &   (/ DIM_LEN /))
+      !CALL Ncrd(XCO2_OBS, ncid, 'xco2_observed',st1d,ct1d)
+      IF (VERTINTOPT .eq. 3) THEN
+      CALL READGOSAT_REAL8( trim (INF), 'xco2_observed', '',
+     &   XCO2_OBS, NPOINTS)
+      ENDIF
+      IF (VERTINTOPT .eq. 1) THEN
+      CALL READGOSAT_REAL8( trim (INF), 'xco2', '',
+     &   XCO2_OBS, NPOINTS)
+      ENDIF
 
-      CALL Ncrd(XCO2FT_UNCERT, ncid, 'xco2freetrop_uncertainty',(/ 1 /),
-     &   (/ DIM_LEN /))
+      !PRINT *,'after first pull...'
 
-      CALL Ncrd(XCO2PBL_OBS, ncid, 'xco2pbl_observed', (/ 1 /), 
-     &   (/ DIM_LEN /))
+      !CALL Ncrd(XCO2_UNCERT, ncid, 'xco2_uncertainty',st1d,
+      !&  ct1d)
+      CALL READGOSAT_REAL8( trim (INF), 'xco2_uncertainty', '',
+     &   XCO2_UNCERT, NPOINTS)
 
-      CALL Ncrd(XCO2PBL_UNCERT, ncid, 'xco2pbl_uncertainty', (/ 1 /), 
-     &   (/ DIM_LEN /))
+      surfheight_TF = Ncdoes_Var_Exist (ncid,'surface_height')
 
-      CALL Ncrd(XCO2_LONGITUDE, ncid, 'longitude', (/ 1 /),
-     &   (/ DIM_LEN /))
+      IF(surfheight_TF) THEN
+      CALL READGOSAT_REAL8( trim (INF), 'surface_height', '',
+     &   XCO2_CLOUDHEIGHT, NPOINTS)
+      !CALL Ncrd(XCO2_CLOUDHEIGHT, ncid, 'surface_height',st1d,
+      !&   ct1d)
+      ELSE
+           XCO2_CLOUDHEIGHT = 0
+      ENDIF
 
-      CALL Ncrd(XCO2_LATITUDE, ncid, 'latitude', (/ 1 /),
-     &   (/ DIM_LEN /))
+      IF(Ncdoes_Var_Exist (ncid, 'xco2freetrop_observed')) THEN
+      CALL READGOSAT_REAL8( trim (INF), 'xco2freetrop_observed', 
+     &   '', XCO2FT_OBS, NPOINTS)
+      !CALL Ncrd(XCO2FT_OBS, ncid, 'xco2freetrop_observed', st1d, 
+      !&   ct1d)
+      ENDIF
 
-      PRINT *,'XCO2_LAT:',XCO2_LATITUDE
+      IF(Ncdoes_Var_Exist (ncid, 'xco2freetrop_uncertainty')) THEN
+      CALL READGOSAT_REAL8( trim (INF), 'xco2freetrop_uncertainty',
+     &   '', XCO2FT_UNCERT, NPOINTS)
+      !      CALL Ncrd(XCO2FT_UNCERT, ncid, 'xco2freetrop_uncertainty',
+      !&  st1d,ct1d)
+      ENDIF
+
+      IF(Ncdoes_Var_Exist (ncid, 'xco2pbl_observed')) THEN
+      CALL READGOSAT_REAL8( trim (INF), 'xco2pbl_observed',
+     &   '', XCO2PBL_OBS, NPOINTS)
+      !      CALL Ncrd(XCO2PBL_OBS, ncid, 'xco2pbl_observed', st1d, 
+      !&  ct1d)
+      ENDIF
+
+      IF(Ncdoes_Var_Exist (ncid, 'xco2pbl_uncertainty')) THEN
+      CALL READGOSAT_REAL8( trim (INF), 'xco2pbl_uncertainty',
+     &   '', XCO2PBL_UNCERT, NPOINTS)
+      !      CALL Ncrd(XCO2PBL_UNCERT, ncid, 'xco2pbl_uncertainty', 
+      !&  st1d, ct1d)
+      ENDIF
+
+      CALL READGOSAT_REAL8( trim (INF), 'longitude',
+     &   '', XCO2_LONGITUDE, NPOINTS)
+
+      CALL READGOSAT_REAL8( trim (INF), 'latitude',
+     &   '', XCO2_LATITUDE, NPOINTS)
+
+      ! CALL Ncrd(XCO2_LONGITUDE, ncid, 'longitude',st1d,
+      !&   ct1d)
+
+      ! CALL Ncrd(XCO2_LATITUDE, ncid, 'latitude', st1d,
+      !&  ct1d)
+
+!      PRINT *,'XCO2_LAT:',XCO2_LATITUDE
 
       CALL Nccl( NCID )
 
-       !CALL READGOSAT_REAL8( trim (INF), 'xco2_observed', '',
-       !&  XCO2_OBS, NPOINTS)
 
-       !CALL READGOSAT_REAL8( trim (INF), 'xco2_uncertainty', '',
-       ! &  XCO2_UNCERT, NPOINTS)
-
-       !CALL READGOSAT_REAL8( trim (INF), 'xco2freetrop_observed', '',
-       !&  XCO2FT_OBS, NPOINTS)
-
-       !CALL READGOSAT_REAL8( trim (INF), 'xco2freetrop_uncertainty', '',
-       !&  XCO2FT_UNCERT, NPOINTS)
-
-       !CALL READGOSAT_REAL8( trim (INF), 'xco2pbl_observed', '',
-       !&  XCO2PBL_OBS, NPOINTS)
-
-       !CALL READGOSAT_REAL8( trim (INF), 'xco2pbl_uncertainty', '',
-       !&  XCO2PBL_UNCERT, NPOINTS)
-
-      ! CALL READGOSAT_REAL4( trim (INF), 'albedo_2', 'Retrieval',
-      !&  ACOS_UNCERT, NPOINTS)
-
-      ! CALL READGOSAT_REAL4( trim (INF), 'dp_cld', 'Preprocessors',
-      !&  ACOS_UNCERT, NPOINTS)
-
-      ! CALL READGOSAT_REAL4( trim (INF), 's32', 'Retrieval',
-      !&  ACOS_UNCERT, NPOINTS)
-
-      ! CALL READGOSAT_REAL4( trim (INF), 'b1offset', 'Retrieval',
-      !&  ACOS_UNCERT, NPOINTS)
-
-      ! CALL READGOSAT_REAL4( trim (INF), 'gain', 'Sounding',
-      !&  ACOS_UNCERT, NPOINTS)
-
-      ! CALL READGOSAT_REAL4( trim (INF), 'surf_type', 'Retrieval',
-      !&  ACOS_UNCERT, NPOINTS)
-
-      ! CALL READGOSAT_REAL4( trim (INF), 'latitude', 'Retrieval',
-      !&  ACOS_UNCERT, NPOINTS)
-
-      ! CALL READGOSAT_REAL4( trim (INF), 'longitude', 'Retrieval',
-      !&  ACOS_UNCERT, NPOINTS)
-
-       CALL ncGOSATOutputCreate(trim(OUTF),NPOINTS,XCO2_LATITUDE,
+       CALL ncGOSATOutputCreate(trim(OUTF),NPOINTS,XCO2_CLOUDHEIGHT,
+     &   XCO2_LATITUDE,
      &   XCO2_LONGITUDE, ID,XCO2_OBS,
      &  XCO2_UNCERT,XCO2PBL_OBS,XCO2PBL_UNCERT,XCO2FT_OBS,XCO2FT_UNCERT,
      &  "xco2_model","xco2pbl_model",
@@ -495,6 +530,7 @@
 
        DEALLOCATE( ID )
        DEALLOCATE( XCO2_OBS)
+       DEALLOCATE( XCO2_CLOUDHEIGHT)
        DEALLOCATE( XCO2_UNCERT)
        DEALLOCATE( XCO2PBL_OBS)
        DEALLOCATE( XCO2PBL_UNCERT)
@@ -705,6 +741,11 @@
       CALL NcDef_Variable( fId, 'time', NF90_DOUBLE,1,
      &     var1, vId )
 
+      ! Define bottom variable
+      vId  = vId + 1
+      CALL NcDef_Variable( fId, 'xco2_surfheight', NF90_DOUBLE,1,
+     &     var1, vId )
+
       var2 = (/ 47 /)     
 
       CALL NcDef_Variable( fId, 'levels', NF90_INT, 1, var2, vId+1 )
@@ -735,8 +776,8 @@
       CALL NcWr(lite_data%xco2_model(1:NPOINTS),fId,
      &    'xco2_model',(/ 1 /),(/ NPOINTS /) )
 
-      CALL NcWr(lite_data%xco2freetrop_model(1:NPOINTS),fId,
-     &    'xco2freetrop_model',(/ 1 /),(/ NPOINTS /) )
+!      CALL NcWr(lite_data%xco2freetrop_model(1:NPOINTS),fId,
+!     &    'xco2freetrop_model',(/ 1 /),(/ NPOINTS /) )
 
       !=========================================================================
       ! Close the netCDF file
@@ -965,6 +1006,10 @@
             DEALLOCATE( Object_Lite_Data%XCO2PBL_UNCERTAINTY     )
       ENDIF
 
+      IF ( ASSOCIATED( Object_Lite_Data%XCO2_CLOUDHEIGHT     )) THEN
+            DEALLOCATE( Object_Lite_Data%XCO2_CLOUDHEIGHT     )
+      ENDIF
+
       END SUBROUTINE Cleanup_Lite_Data
 !------------------------------------------------------------------------------
 !          Harvard University Atmospheric Chemistry Modeling Group            !
@@ -981,18 +1026,19 @@
 !\\
 ! !INTERFACE:
 !
-      SUBROUTINE READ_VARIABLES( am_I_Root )
+      SUBROUTINE READ_VARIABLES( am_I_Root, Input_Opt )
 !
 ! !USES:
 !
       USE ERROR_MOD,  ONLY : GEOS_CHEM_STOP
       USE FILE_MOD,   ONLY : IU_FILE
       USE FILE_MOD,   ONLY : IOERROR
-      USE TRACER_MOD, ONLY : N_TRACERS
-      USE TRACER_MOD, ONLY : ITS_A_FULLCHEM_SIM
 
       USE CMN_SIZE_MOD     ! Size parameters
       USE COMODE_LOOP_MOD  ! NAMEGAS, NSPEC
+
+      USE GIGC_Input_Opt_Mod, ONLY : OptInput
+
 !
 ! !INPUT PARAMETERS:
 !
@@ -1023,6 +1069,8 @@
 !
 ! !LOCAL VARIABLES:
 !
+      TYPE(OptInput), INTENT(IN)    :: Input_Opt   ! Input Options object
+
       LOGICAL             :: IS_FULLCHEM
       INTEGER             :: M, N, NUM, R, IK, IOS
       CHARACTER(LEN=255)  :: LINE
@@ -1035,7 +1083,7 @@
       NCS = NCSURBAN
 
       ! Test if this is a fullchem run
-      IS_FULLCHEM = ITS_A_FULLCHEM_SIM()
+      IS_FULLCHEM = Input_Opt%ITS_A_FULLCHEM_SIM
 
       ! Read four lines of header
       DO N = 1, 4 
@@ -1088,7 +1136,7 @@
                READ( LINE(5:14), '(i10)' ) NUM
 
                ! Make sure the tracer # is valid!
-               IF ( NUM < 0 .or. NUM > N_TRACERS ) THEN                   
+               IF ( NUM < 0 .or. NUM > Input_Opt%N_TRACERS ) THEN  
                   IF ( am_I_Root ) THEN
                     WRITE( 6, 100 ) TRIM( LINE )
  100                FORMAT( 'TRACER ', i4, ' is out of range!' )
@@ -1289,6 +1337,10 @@
       USE NCCOOARDSFORMAT, ONLY : READGOSAT_REAL4
       USE JULDAY_MOD,        ONLY : CALDATE
       USE TIME_MOD,      ONLY : YMD_EXTRACT
+      USE m_netcdf_io_read
+      USE m_netcdf_io_close
+      USE m_netcdf_io_open
+      USE m_netcdf_io_checks
 !
 ! !INPUT PARAMETERS:
 !
@@ -1307,16 +1359,21 @@
 !
       INTEGER                              :: N, IOS, YYYYMMDD, HHMMSS
       INTEGER                              :: QYY,QMM,QDD, QHH, QMN, SS
+      INTEGER                              :: NCID
+      INTEGER                              :: st2d(2),ct2d(2)
+      INTEGER                              :: st1d(1),ct1d(1)
       REAL*8, dimension(:), allocatable    :: TIM
       REAL*8                               :: JULNDAY
-      REAL*4, dimension(:), allocatable    :: LAT, LON, XCO2, ERR
+      REAL*4, dimension(:), allocatable    :: LAT, LON, XCO2, ERR, PRESS
+      REAL*4, dimension(:,:), allocatable  ::  PRESSWGHT, AK, OCO2_PR
+      REAL*4, dimension(:,:), allocatable  ::  OCO2_PRESS
       INTEGER*8, dimension(:), allocatable :: ID
       CHARACTER(LEN=10) :: TYPE
       CHARACTER(LEN=14) :: SOUNDING_ID_CHAR
       !=================================================================
       ! READ_POINTS begins here!
       !=================================================================
-
+      
       !=================================================================
       ! Read plane track points -- plane, lat/lon/alt, date/time
       ! We have previously computed NPOINTS in INIT_GOSAT
@@ -1328,13 +1385,60 @@
       ALLOCATE( ERR( NPOINTS ))
       ALLOCATE( ID( NPOINTS ))
       ALLOCATE( TIM( NPOINTS ))
+      ALLOCATE( PRESS( NPOINTS ))
+      ALLOCATE( PRESSWGHT( 47, NPOINTS) )
+      ALLOCATE( AK( 20, NPOINTS) )
+      ALLOCATE( OCO2_PR( 20, NPOINTS) )
+      ALLOCATE( OCO2_PRESS( 20, NPOINTS) )
 
-      !print *,'in readpoints'
+      print *,'NPOINTS:',NPOINTS
       !print *,'INF:',trim(INF)
 
       CALL READGOSAT_REAL4(trim(INF),'latitude','',LAT,NPOINTS)
       CALL READGOSAT_REAL4(trim(INF),'longitude','',LON,
      & NPOINTS)
+      CALL Ncop_Rd( NCID, trim(INF) )
+
+      IF( Ncdoes_Var_Exist (ncid, 'pressure_weight')) THEN
+         IF ( VERTINTOPT .eq. 3 ) THEN
+           st2d = (/ 1 , 1 /)
+           ct2d = (/ 47, NPOINTS /)
+           CALL Ncrd(PRESSWGHT,NCID,'pressure_weight',st2d,ct2d)
+         ENDIF
+         !IF ( VERTINTOPT .eq. 1 ) THEN
+         !  st2d = (/ 1 , 1 /)
+         !  ct2d = (/ 20, NPOINTS /)
+         !  CALL Ncrd(,NCID,'pressure_weight',st2d,ct2d)
+         !ENDIF 
+      ENDIF
+
+      IF(Ncdoes_Var_Exist (ncid, 'xco2_averaging_kernel')) THEN
+        st2d = (/ 1, 1/)
+        ct2d = (/ 20, NPOINTS /)
+        CALL Ncrd(AK, ncid, 'xco2_averaging_kernel',
+     &  st2d,ct2d)
+      ENDIF
+
+      IF(Ncdoes_Var_Exist (ncid, 'co2_profile_apriori')) THEN
+        st2d = (/ 1, 1/)
+        ct2d = (/ 20, NPOINTS /)
+        CALL Ncrd(OCO2_PR, ncid, 'co2_profile_apriori',
+     &  st2d,ct2d)
+      ENDIF
+
+      IF(Ncdoes_Var_Exist (ncid, 'pressure_levels')) THEN
+        st2d = (/ 1, 1/)
+        ct2d = (/ 20, NPOINTS /)
+        CALL Ncrd(OCO2_PRESS, ncid, 'pressure_levels',
+     &  st2d,ct2d)
+      ENDIF
+
+      CALL Nccl( NCID )
+
+      !-- LEAVE INIT AT ZERO UNTIL FIXED
+      !PRESS = 0.
+!      CALL READGOSAT_REAL4(trim(INF),'xco2_cloudheight','',PRESS,
+!     & NPOINTS)
 
       !print *,'LAT:',LAT
       CALL READGOSAT_ID( trim (INF), NPOINTS, ID)
@@ -1345,27 +1449,27 @@
       CALL READGOSAT_REAL8( trim (INF), 'time', '',
      &  TIM, NPOINTS)
 
+      !PRINT *,'shape plat:',SHAPE(PLAT)
+      !PRINT *,'shape lat:',SHAPE(LAT)
 
-      !print *,'here2'
-
-      PLAT = LAT
-      PLON = LON
-      
+      !PRINT *,'shape ppresswgth:',SHAPE(PPRESSWGHT)
+      !PRINT *,'shape presswgth:',SHAPE(PRESSWGHT)
+      !PLAT = LAT
+      !PLON = LON
+      !PPRESSWGHT(:,1:NPOINTS) = PRESSWGHT
+      !PPRESS = PRESS
       !PXCO2 = XCO2
       !PERR = ERR
+      PRINT *,'done w/ first part'
 
-      !print *,'PID:',ID
-
- 
        DO N = 1, NPOINTS
 
          !==============================================================
          ! Read date and time coordinates -- also do error checks
-         !==============================================================
-
+         !============================================================== 
          !-- READ SOUNDING_ID AND PARSE INTO INTEGER DATE COMPS
          !WRITE(SOUNDING_ID_CHAR, '(i14.14)') ID(N)
-         PID(N) = SOUNDING_ID_CHAR
+         !PID(N) = SOUNDING_ID_CHAR
          !READ( SOUNDING_ID_CHAR(1:4),'(i)') QYY
          !READ( SOUNDING_ID_CHAR(5:6),'(i)') QMM  
          !READ( SOUNDING_ID_CHAR(7:8), '(i)' ) QDD
@@ -1373,15 +1477,15 @@
          !READ( SOUNDING_ID_CHAR(11:12), '(i)' ) QMN
 
          JULNDAY = TIM(N)/86400 + 2440587.5
-         PRINT *,'GOSAT/JULNDAY:',JULNDAY
+         !PRINT *,'GOSAT/JULNDAY:',JULNDAY
          CALL CALDATE( JULNDAY, YYYYMMDD, HHMMSS )
 
          CALL YMD_EXTRACT( YYYYMMDD, QYY, QMM, QDD ) 
          CALL YMD_EXTRACT( HHMMSS, QHH, QMN, SS )
 
 
-        !print *,'POINT number:',N
-        !print *,'PID(N):',PID(N)
+         !print *,'POINT number:',N
+         !print *,'PID(N):',PID(N)
  
         ! Error check MONTH
          IF ( QMM < 1 .or. QMM > 12 ) THEN
@@ -1436,6 +1540,14 @@
          ! Store TAU (hours since 1 Jan 1985) in the global PTAU array
          PTAU(N)  = GET_TAU0( QMM, QDD, QYY, QHH, QMN, 0 )
 
+         PLAT(N) = LAT(N)
+         PLON(N) = LON(N)
+         PERR(N) = ERR(N)
+         PPRESSWGHT(:,N) = PRESSWGHT(:,N)
+         PAK(:,N) = AK(:,N)
+         POCO2_PR(:,N) = OCO2_PR(:,N)
+         POCO2_PRESS(:,N) = OCO2_PRESS(:,N)
+
          !==============================================================
          ! Read lon/lat/alt coordinates -- also do error checks
          !==============================================================
@@ -1470,6 +1582,10 @@
       DEALLOCATE( XCO2 )
       DEALLOCATE( ERR )
       DEALLOCATE( ID )
+      DEALLOCATE( PRESS )
+      DEALLOCATE( PRESSWGHT )
+      DEALLOCATE( AK )
+      DEALLOCATE( OCO2_PR)
 
       !=================================================================
       ! Echo number of points found and quit
@@ -1480,29 +1596,38 @@
       END SUBROUTINE READ_POINTS
 !EOC
 !------------------------------------------------------------------------------
-!          Harvard University Atmospheric Chemistry Modeling Group            !
+!                  GEOS-Chem Global Chemical Transport Model                  !
 !------------------------------------------------------------------------------
 !BOP
 !
 ! !IROUTINE: ro2_setup
 !
-! !DESCRIPTION: Subroutine RO2\_SETUP saves the SMVGEAR species indices of RO2 
-!  constituents in the PRO2 array.  Also computes the count NPRO2. 
+! !DESCRIPTION: Subroutine RO2\_SETUP saves the SMVGEAR species indices of RO2
+!  constituents in the PRO2 array.  Also computes the count NPRO2.
 !\\
 !\\
 ! !INTERFACE:
 !
-      SUBROUTINE RO2_SETUP
+      SUBROUTINE RO2_SETUP( am_I_Root, Input_Opt, RC )
 !
 ! !USES:
 !
-      USE ERROR_MOD,  ONLY : GEOS_CHEM_STOP
-      USE TRACER_MOD, ONLY : ITS_A_FULLCHEM_SIM
-
-      USE CMN_SIZE_MOD   ! Size parameters
-      USE COMODE_LOOP_MOD       ! NSPEC, NAMEGAS, NCS
-! 
-! !REVISION HISTORY: 
+      USE CMN_SIZE_MOD
+      USE COMODE_LOOP_MOD
+      USE ERROR_MOD,          ONLY : GEOS_CHEM_STOP
+      USE GIGC_ErrCode_Mod
+      USE GIGC_Input_Opt_Mod, ONLY : OptInput
+!
+! !INPUT PARAMETERS:
+!
+      LOGICAL,        INTENT(IN)  :: am_I_Root   ! Are we on the root CPU?
+      TYPE(OptInput), INTENT(IN)  :: Input_Opt   ! Input Options object
+!
+! !OUTPUT PARAMETERS:
+!
+      INTEGER,        INTENT(OUT) :: RC          ! Success or failure?
+!
+! !REVISION HISTORY:
 !  01 Aug 2003 - M. Evans    - Initial version
 !  (1 ) Now references GEOS_CHEM_STOP from "error_mod.f", which frees all
 !        allocated memory before stopping the run. (bmy, 10/15/02)
@@ -1512,6 +1637,8 @@
 !  (5 ) NOTE: PO3 was a bug, that should have been PO2 (tmf, 2/10/09)
 !  (6 ) Add new RO2 species according to 'globchem.dat' (tmf, 3/10/09)
 !  29 Jul 2011 - R. Yantosca - Added ProTeX headers
+!  25 Jun 2014 - R. Yantosca - Now accept am_I_Root, Input_Opt, RC
+!  25 Jun 2014 - R. Yantosca - Removed references to tracer_mod.F
 !EOP
 !------------------------------------------------------------------------------
 !BOC
@@ -1523,13 +1650,13 @@
       !=================================================================
       ! RO2_SETUP begins here!
       !=================================================================
-    
-      ! Initialize 
+
+      ! Initialize
       NPRO2 = 0
 
-      ! We only need to proceed for SMVGEAR chemistry       
-      IF ( .not. ITS_A_FULLCHEM_SIM() ) RETURN
-      
+      ! We only need to proceed for SMVGEAR chemistry
+      IF ( .not. Input_Opt%ITS_A_FULLCHEM_SIM ) RETURN
+
       !=================================================================
       ! Loop over all SMVGEAR species, test for RO2 components
       !=================================================================
@@ -1537,18 +1664,18 @@
 
          ! If we have found an RO2 compoent, add its species # to
          ! the PRO2 global array, and increment counter
-         ! NOTE: PO3 was a bug, that should have been PO2 (tmf, 2/10/09) 
+         ! NOTE: PO3 was a bug, that should have been PO2 (tmf, 2/10/09)
          SELECT CASE( TRIM( NAMEGAS(M) ) )
 
-            CASE ( 'HO2',  'MO2',  'A3O2', 'ATO2', 'B3O2', 
-     &             'ETO2', 'GCO3', 'IAO2', 'KO2',  'MAO3', 
-     &             'MCO3', 'MRO2', 'PO2',  'RIO2', 'VRO2', 
-     &             'ACO3', 'EO2', 'ENCO3', 'ENO2', 'GLCO3', 
+            CASE ( 'HO2',  'MO2',  'A3O2', 'ATO2', 'B3O2',
+     &             'ETO2', 'GCO3', 'IAO2', 'KO2',  'MAO3',
+     &             'MCO3', 'MRO2', 'PO2',  'RIO2', 'VRO2',
+     &             'ACO3', 'EO2', 'ENCO3', 'ENO2', 'GLCO3',
      &             'IACO3', 'INO2', 'MACO3', 'NICO3', 'NIO2',
-     &             'VOHRO2', 'RIO1', 'C59O2', 'MAPO2', 
+     &             'VOHRO2', 'RIO1', 'C59O2', 'MAPO2',
      &             'BRO2', 'TRO2', 'XRO2', 'NRO2',
-     &             'MOBAOO', 'ISOPNBO2', 'ISOPNDO2', 'IEPOXOO', 
-     &             'PYPO2', 'MACRNO2', 'PMNO2', 'HC5OO', 'RCO3') 
+     &             'MOBAOO', 'ISOPNBO2', 'ISOPNDO2', 'IEPOXOO',
+     &             'PYPO2', 'MACRNO2', 'PMNO2', 'HC5OO', 'RCO3')
                NPRO2       = NPRO2 + 1
                PRO2(NPRO2) = M
 
@@ -1560,9 +1687,9 @@
       ENDDO
 
       ! Error check
-      IF ( NPRO2 > MAXRO2 ) THEN 
+      IF ( NPRO2 > MAXRO2 ) THEN
          WRITE( 6, '(a)' ) 'NPRO2 exceeds maximum allowed value!'
-         WRITE( 6, '(a)' ) 'STOP in RO2_SETUP (GOSAT_mod.f)'
+         WRITE( 6, '(a)' ) 'STOP in RO2_SETUP (planeflight_mod.f)'
          WRITE( 6, '(a)' ) REPEAT( '=', 79 )
          CALL GEOS_CHEM_STOP
       ENDIF
@@ -1576,31 +1703,42 @@
       END SUBROUTINE RO2_SETUP
 !EOC
 !------------------------------------------------------------------------------
-!          Harvard University Atmospheric Chemistry Modeling Group            !
+!                  GEOS-Chem Global Chemical Transport Model                  !
 !------------------------------------------------------------------------------
 !BOP
 !
 ! !IROUTINE: noy_setup
 !
-! !DESCRIPTION: Subroutine NOY\_SETUP saves the SMVGEAR species indices of NOy 
-!  constituents in the PNOY array.  Also computes the count NPNOY. 
+! !DESCRIPTION: Subroutine NOY\_SETUP saves the SMVGEAR species indices of NOy
+!  constituents in the PNOY array.  Also computes the count NPNOY.
 !\\
 !\\
 ! !INTERFACE:
 !
-      SUBROUTINE NOY_SETUP
+      SUBROUTINE NOY_SETUP( am_I_Root, Input_Opt, RC )
 !
 ! !USES:
 !
-      USE ERROR_MOD,  ONLY : GEOS_CHEM_STOP
-      USE TRACER_MOD, ONLY : ITS_A_FULLCHEM_SIM
-
-      USE CMN_SIZE_MOD   ! Size parameters
-      USE COMODE_LOOP_MOD       ! NSPEC, NAMEGAS, NCS
-! 
-! !REVISION HISTORY: 
+      USE CMN_SIZE_MOD
+      USE COMODE_LOOP_MOD
+      USE ERROR_MOD,          ONLY : GEOS_CHEM_STOP
+      USE GIGC_ErrCode_Mod
+      USE GIGC_Input_Opt_Mod, ONLY : OptInput
+!
+! !INPUT PARAMETERS:
+!
+      LOGICAL,        INTENT(IN)  :: am_I_Root   ! Are we on the root CPU?
+      TYPE(OptInput), INTENT(IN)  :: Input_Opt   ! Input Options object
+!
+! !OUTPUT PARAMETERS:
+!
+      INTEGER,        INTENT(OUT) :: RC          ! Success or failure?
+!
+! !REVISION HISTORY:
 !  01 Jun 2009 - F. Paulot   - Initial version
 !  29 Jul 2011 - R. Yantosca - Added ProTeX headers
+!  25 Jun 2014 - R. Yantosca - Now accept am_I_Root, Input_Opt, RC
+!  25 Jun 2014 - R. Yantosca - Removed references to tracer_mod.F
 !EOP
 !------------------------------------------------------------------------------
 !BOC
@@ -1612,13 +1750,13 @@
       !=================================================================
       ! NOY_SETUP begins here!
       !=================================================================
-    
-      ! Initialize 
+
+      ! Initialize
       NPNOY = 0
 
-      ! We only need to proceed for SMVGEAR chemistry       
-      IF ( .not. ITS_A_FULLCHEM_SIM() ) RETURN
-      
+      ! We only need to proceed for SMVGEAR chemistry
+      IF ( .not. Input_Opt%ITS_A_FULLCHEM_SIM ) RETURN
+
       !=================================================================
       ! Loop over all SMVGEAR species, test for NOY components
       !=================================================================
@@ -1648,9 +1786,9 @@
       ENDDO
 
       ! Error check
-      IF ( NPNOY > MAXNOY ) THEN 
+      IF ( NPNOY > MAXNOY ) THEN
          WRITE( 6, '(a)' ) 'NPNOY exceeds maximum allowed value!'
-         WRITE( 6, '(a)' ) 'STOP in NOY_SETUP (GOSAT_mod.f)'
+         WRITE( 6, '(a)' ) 'STOP in NOY_SETUP (planeflight_mod.f)'
          WRITE( 6, '(a)' ) REPEAT( '=', 79 )
          CALL GEOS_CHEM_STOP
       ENDIF
@@ -1664,31 +1802,42 @@
       END SUBROUTINE NOY_SETUP
 !EOC
 !------------------------------------------------------------------------------
-!          Harvard University Atmospheric Chemistry Modeling Group            !
+!                  GEOS-Chem Global Chemical Transport Model                  !
 !------------------------------------------------------------------------------
 !BOP
 !
 ! !IROUTINE: an_setup
 !
-! !DESCRIPTION: Subroutine AN\_SETUP saves the SMVGEAR species indices of AN 
+! !DESCRIPTION: Subroutine AN\_SETUP saves the SMVGEAR species indices of AN
 !  constituents in the P\_AN array.  Also computes the count NPAN.
 !\\
 !\\
 ! !INTERFACE:
 !
-      SUBROUTINE AN_SETUP
+      SUBROUTINE AN_SETUP( am_I_Root, Input_Opt, RC )
 !
 ! !USES:
 !
-      USE ERROR_MOD,  ONLY : GEOS_CHEM_STOP
-      USE TRACER_MOD, ONLY : ITS_A_FULLCHEM_SIM
-
-      USE CMN_SIZE_MOD   ! Size parameters
-      USE COMODE_LOOP_MOD       ! NSPEC, NAMEGAS, NCS
-! 
+      USE CMN_SIZE_MOD
+      USE COMODE_LOOP_MOD
+      USE ERROR_MOD,          ONLY : GEOS_CHEM_STOP
+      USE GIGC_ErrCode_Mod
+      USE GIGC_Input_Opt_Mod, ONLY : OptInput
+!
+! !INPUT PARAMETERS:
+!
+      LOGICAL,        INTENT(IN)  :: am_I_Root   ! Are we on the root CPU?
+      TYPE(OptInput), INTENT(IN)  :: Input_Opt   ! Input Options object
+!
+! !OUTPUT PARAMETERS:
+!
+      INTEGER,        INTENT(OUT) :: RC          ! Success or failure?
+!
 ! !REVISION HISTORY:
-!  04 Jan 2010 - F. Paulot   - Initial version
+!  01 Jun 2009 - F. Paulot   - Initial version
 !  29 Jul 2011 - R. Yantosca - Added ProTeX headers
+!  25 Jun 2014 - R. Yantosca - Now accept am_I_Root, Input_Opt, RC
+!  25 Jun 2014 - R. Yantosca - Removed references to tracer_mod.F
 !EOP
 !------------------------------------------------------------------------------
 !BOC
@@ -1700,13 +1849,13 @@
       !=================================================================
       ! AN_SETUP begins here!
       !=================================================================
-    
-      ! Initialize 
+
+      ! Initialize
       NPAN = 0
 
-      ! We only need to proceed for SMVGEAR chemistry       
-      IF ( .not. ITS_A_FULLCHEM_SIM() ) RETURN
-      
+      ! We only need to proceed for SMVGEAR chemistry
+      IF ( .not. Input_Opt%ITS_A_FULLCHEM_SIM ) RETURN
+
       !=================================================================
       ! Loop over all SMVGEAR species, test for AN components
       !=================================================================
@@ -1718,7 +1867,7 @@
 
            CASE ( 'ISOPNB', 'ISOPND', 'MVKN',  'MACRN',
      &            'ISN2',   'MNO3',   'ISNO3', 'R4N2',
-     &            'PROPNN', 'ETHLN' ) 
+     &            'PROPNN', 'ETHLN' )
 
                NPAN       = NPAN + 1
                P_AN(NPAN) = M
@@ -1731,9 +1880,9 @@
       ENDDO
 
       ! Error check
-      IF ( NPAN > MAXAN ) THEN 
+      IF ( NPAN > MAXAN ) THEN
          WRITE( 6, '(a)' ) 'NPAN exceeds maximum allowed value!'
-         WRITE( 6, '(a)' ) 'STOP in AN_SETUP (GOSAT_mod.f)'
+         WRITE( 6, '(a)' ) 'STOP in AN_SETUP (planeflight_mod.f)'
          WRITE( 6, '(a)' ) REPEAT( '=', 79 )
          CALL GEOS_CHEM_STOP
       ENDIF
@@ -1777,15 +1926,16 @@
       USE GIGC_State_Chm_Mod, ONLY : ChmState
       USE GIGC_State_Met_Mod, ONLY : MetState
       USE ERROR_MOD,    ONLY : GEOS_CHEM_STOP  
-      USE PRESSURE_MOD, ONLY : GET_PEDGE
+      USE PRESSURE_MOD, ONLY : GET_PEDGE, GET_PCENTER
       USE TIME_MOD,     ONLY : GET_TAU,        GET_TS_DIAG
-      USE TRACER_MOD,   ONLY : TCVV
       USE OCEAN_MERCURY_MOD,  ONLY : Fp, Fg !eds 10/27/11
       USE PBL_MIX_MOD,   ONLY : GET_FRAC_UNDER_PBLTOP
 
       !USE CMN_SIZE_MOD, ONLY : LLPAR
       !USE CMN_FJ_MOD,   ONLY : IPAR, JPAR, LPAR, JPMAX, JPPJ
-      USE JV_CMN_MOD         ! ODAER, QAA, QAA_AOD
+      !USE CMN_FJX_MOD,        ONLY : ODAER, QAA, QAA_AOD, ODMDUST
+      !USE CMN_FJX_MOD,        ONLY : IWVSELECT, ACOEF_WV, BCOEF_WV
+      USE JV_CMN_MOD
       USE COMODE_LOOP_MOD    ! CSPEC, etc.
       USE NCCOOARDSFORMAT,  ONLY  : WRITE_VARS_TO_FILE_NC
       USE NCCOOARDSFORMAT,  ONLY  : ncGOSATOutputClose
@@ -1832,9 +1982,9 @@
 ! !LOCAL VARIABLES:
 !
       LOGICAL, SAVE       :: FIRST = .TRUE.
-      LOGICAL             :: PCHEM
+      LOGICAL             :: PCHEM, LINTERP
       INTEGER             :: I, IP, IRHN, J, L, JLOOP, M, N, R, RH, V
-      INTEGER             :: LPLANE
+      INTEGER             :: LL,LPLANE, IWV, ISPC, K
       INTEGER             :: VERTIND
       REAL*8              :: TK, PTAUS, PTAUE, CONSEXP, VPRESH2O, SAODnm
       REAL*8              :: VARI(NPVAR)
@@ -1842,6 +1992,14 @@
       REAL*8              :: VARIPBL(NPVAR)
       REAL*8              :: VARIFREETROP(NPVAR)
       REAL*8, ALLOCATABLE :: PARTVARI(:)
+
+      REAL*8                :: AK_INTERP(47)
+      REAL*8                :: OCO2_PR_INTERP(47)
+      REAL*8                :: GC_PRESS_IN(47)
+      REAL*8                :: GC_PRESS_WGHT(47)
+
+      REAL*8                :: TMPSUM(47)
+
       ! ASCENDS KERNEL (D. Baker)
       REAL*8              :: KERN(47) = (/ 0.000035000, 0.000230000,
      &                        0.000881000, 0.002041000, 0.002992000,
@@ -1859,6 +2017,9 @@
      &                        0.015668833, 0.013515000, 0.023152500,
      &                        0.013440364, 0.005020727, 0.005020727,
      &                        0.005020727, 0.005020727, 0.005020727 /)
+
+      LOGICAL, PARAMETER       :: OCO2 = .FALSE.
+
       ! Aerosol types: SULF, BLKC, ORGC, SALA, SALC 
       INTEGER             :: IND(5) = (/ 22, 29, 36, 43, 50 /)
 !
@@ -1881,6 +2042,16 @@
       ! Return if there is no flighttrack data for today
       PRINT *,'DO_GOSAT:',DO_GOSAT
       IF ( .not. DO_GOSAT ) RETURN
+
+      !Determine if optical properties need interpolating
+      !The LUT wavelengths in IWVSELECT will match if no interpolation
+      !is needed. (output is only for the first requested wavelength)
+      !(DAR 10/2013)
+      !IF(IWVSELECT(1,1).EQ.IWVSELECT(2,1)) THEN
+      !   LINTERP=.FALSE.
+      !ELSE
+      !   LINTERP=.TRUE.
+      !ENDIF
 
       ! Loop over all the locations that have not yet been found
       DO M = PPOINT, NPOINTS
@@ -1930,7 +2101,7 @@
 
             ! Return grid box indices for the chemistry region
             ! NOTE: PCHEM and JLOOP are only defined for SMVGEAR runs!
-            CALL TEST_VALID( M, PCHEM, JLOOP, I, J, L )
+            CALL TEST_VALID( M, PCHEM, JLOOP, I, J, L, Input_Opt )
 
             ! Initialize SMVGEAR reaction counter
             R = 0
@@ -2107,25 +2278,25 @@
 #endif
 
                   !--------------------------
-                  ! Column aerosol optical 
+                  ! Column aerosol optical
                   ! depths [unitless]
                   !--------------------------
                   CASE ( 2001:2005 )
-                  
+
                      ! Only archive where SMVGEAR chem is done
-                  
+
                         ! Remove MISSING flag
                         VARI(V) = 0d0
-                  
+
                         ! Aerosol number
                         N = PVAR(V) - 2000
-                  
+
                         ! Loop over RH bins
                         DO RH = 1, NRH
-                        
+
                            ! Scaling factor for wavelength specified in
                            ! jv_spec_aod.dat
-    !                       SAODnm  = QAA_AOD(IND(N)+RH-1) / 
+    !                       SAODnm  = QAA_AOD(IND(N)+RH-1) /
     ! &                               QAA(4,IND(N)+RH-1)
                            ! We no longer need to scale by wavelength
                            ! (skim, 02/03/11)
@@ -2133,41 +2304,43 @@
 
                            ! Index for type of aerosol and RH value
                            IRHN    = ( (N-1) * NRH ) + RH
-                        
+
                            ! Sum AOD over all RH bins and store in VARI(V)
                            ! Sum over all vertical levels (bmy, 10/24/05)
-                           VARI(V) = VARI(V) + 
+                           VARI(V) = VARI(V) +
      &                               SUM( SAODnm * ODAER(I,J,:,IRHN) )
                         ENDDO
+
+
 
                   !--------------------------
                   ! Aerosol optical depths
                   ! below plane [unitless]
                   !--------------------------
                   CASE ( 3001:3005 )
-                  
+
                      IF ( PCHEM ) THEN
 
                        ! Remove MISSING flag
                         VARI(V) = 0d0
-                  
+
                         ! Aerosol number
                         N = PVAR(V) - 3000
-                  
+
                         ! Loop over RH bins
                         DO RH = 1, NRH
-                        
+
                            ! Scaling factor for wavelength specified in
                            ! jv_spec_aod.dat
-    !                       SAODnm  = QAA_AOD(IND(N)+RH-1) / 
+    !                       SAODnm  = QAA_AOD(IND(N)+RH-1) /
     ! &                               QAA(4,IND(N)+RH-1)
                            ! We no longer need to scale by wavelength
                            ! (skim, 02/03/11)
-                           SAODnm = 1.0 
+                           SAODnm = 1.0
 
                            ! Index for type of aerosol and RH value
                            IRHN    = ( (N-1) * NRH ) + RH
-                          
+
                            ! Level of the plane.  AOD's are only computed
                            ! up to the tropopause, so if the plane goes into
                            ! the stratosphere, the AOD below plane will be
@@ -2177,7 +2350,7 @@
 
                            ! Sum AOD over all RH bins and store in VARI(V)
                            ! Sum from surface to level where the plane is
-                           VARI(V) = VARI(V) + 
+                           VARI(V) = VARI(V) +
      &                          SUM( SAODnm * ODAER(I,J,1:LPLANE,IRHN) )
                         ENDDO
                      ENDIF
@@ -2212,114 +2385,269 @@
                      !VARI(V) = STT(I,J,L,N) * TCVV(N) / AD(I,J,L)
                      !print *,'old:',STT(I,J,L,N)*TCVV(N) / AD(I,J,L)
                      !-- Temp kernel weighting for GOSAT code
-                     DO VERTIND = 1, LLPAR       
+
+
+
+
+                !-------------------------------------------------------------------------
+                !--  This option controls what type of vertical integration of CO2 is done
+                !--  1:  OCO2
+                !--  2:  ASCENDS FIXED KERNEL (KERN variable)
+                !--  3:  Pressure weighting via "pressure_weights" variable in "lite" ncdf
+                !--  4:  Straight pressure weighting
+                !-------------------------------------------------------------------------
+
+               !PRINT *,'VERTINTOPT:',VERTINTOPT
+
+               SELECT CASE (VERTINTOPT)
+ 
+            CASE(1)
+
+            !------------------------------------------------------
+            !--  This option weights the column vertical mean by using the OCO2
+            !-- averaging kernel.  It interpolates this (and the prior CO2 profile)
+            !--  onto the GCHEM pressure levels. Then uses something like:
+            !-- XCO2_i = ak_i*press_i*co2_model_i + (1-ak_i)*press_i*aprior_co2
+            !-- Note that PBL XCO2 is used to store the "no AK" case (press weight)
+            !------------------------------------------------------
+
+            !-- INTEGRATE A PRESSURE WEIGHTED AVG DOWN TO CLOUD TOP (or zero for surface)
+
+            !-- Get local pressure profile
+
+
+           DO VERTIND = 1, LLPAR
+            GC_PRESS_IN(VERTIND) = REAL(GET_PCENTER(I,J,VERTIND),8) 
+            GC_PRESS_WGHT(VERTIND) = GET_PEDGE(I,J,VERTIND)-
+     &                                 GET_PEDGE(I,J,VERTIND+1)
+            !- levels below OCO2 surf set to zero
+            IF (GC_PRESS_IN(VERTIND) .gt. POCO2_PRESS(20,M)) THEN
+                GC_PRESS_WGHT(VERTIND) = 0
+            ENDIF
+
+            ENDDO
+
+   
+           GC_PRESS_WGHT = GC_PRESS_WGHT / sum(GC_PRESS_WGHT)
+           
+
+        CALL interp_linear ( 1, 20, POCO2_PRESS(:,M),
+     &                      PAK(:,M),47,
+     &          GC_PRESS_IN(47:1:-1), AK_INTERP )
+
+        CALL interp_linear ( 1, 20, POCO2_PRESS(:,M),
+     &                      POCO2_PR(:,M),47,
+     &          GC_PRESS_IN(47:1:-1), OCO2_PR_INTERP )
+            !PRINT *,'M:',M
+            !PRINT *,'GC_PRESS_IN:',GC_PRESS_IN
+            !PRINT *,'GC_WGHT',GC_PRESS_WGHT
+            !PRINT *,'GC_WGHT SUM:', SUM(GC_PRESS_WGHT)
+            !PRINT *,'POCO2_PRESS(M,:):',POCO2_PRESS(:,M)
+            !PRINT *,'POCO2_PR(,M):',POCO2_PR(:,M)
+            !PRINT *,'AK20:',PAK(:,M)
+            !PRINT *,'AKINTERP(1):',AK_INTERP
+            !PRINT *,'PR_PROFILE_INTERP:',OCO2_PR_INTERP
+            !PRINT *,'gc trace:',(STT(I,J,:,N)*Input_Opt%TCVV(N) /
+            !&                     (State_Met%AD(I,J,:)*(1-
+            !&                       State_Met%SPHU(I,J,:)*10**-3)))
+
+             TMPSUM = 0.
+
+                DO VERTIND = 1, LLPAR
+                    PARTVARI(VERTIND) = AK_INTERP(LLPAR-VERTIND+1)*
+     &               GC_PRESS_WGHT(VERTIND)*10**6*(STT(I,J,VERTIND,N) *
+!    &               GC_PRESS_WGHT(VERTIND)*(STT(I,J,VERTIND,N) *
+     &                  Input_Opt%TCVV(N) / 
+     &                   (State_Met%AD(I,J,VERTIND)*(1-
+     &                    State_Met%SPHU(I,J,VERTIND)*10**-3)))
+     &              + GC_PRESS_WGHT(VERTIND) * 
+     &                (1-AK_INTERP(LLPAR-VERTIND+1))*
+     &               OCO2_PR_INTERP(LLPAR-VERTIND+1)
+
+                  ENDDO
+
+                      VARI(V) = SUM(PARTVARI) * ( 1E-6 )
+                     IF ( VARI(V) < TINY ) VARI(V) = 0.d0
+
+                    TMPSUM = PARTVARI
+
+            !PRINT *,'test ak xco2:',PARTVARI
+
+            !-- For full column XCO2 by pressure using MODEL CO2 for all levels
+
+                DO VERTIND = 1, LLPAR
+                    PARTVARI(VERTIND) = 
+     &               GC_PRESS_WGHT(VERTIND)*(STT(I,J,VERTIND,N) *
+     &                  Input_Opt%TCVV(N) /
+     &                   (State_Met%AD(I,J,VERTIND)*(1-
+     &                    State_Met%SPHU(I,J,VERTIND)*10**-3)))
+
+                     !PRINT *,'PARTVARI(',VERTIND,'):',PARTVARI(VERTIND)
+                     ENDDO
+
+                       VARIPBL(V) = SUM(PARTVARI)
+                     IF (  VARIPBL(V) < TINY )  VARIPBL = 0.d0
+
+      !PRINT *,'test press xco2:',PARTVARI
+
+      !PRINT *,'vert diff from AK:', TMPSUM - PARTVARI*10**6
+      !PRINT *,'sum diff from AK:',sum(TMPSUM - PARTVARI*10**6)
+
+               !VARIFREETROP(V) = sum(TMPSUM - PARTVARI*10**6)
+               VARIFREETROP(V) = sum(PARTVARI)
+
+       !stop('testing.....')
+
+                 CASE (4)
+   
+                !------------------------------------------------------
+                !--  This option is for pressure weighted, calcs
+                !--  PBL, FREETROP and FULLCOLUMN XCO2
+                !------------------------------------------------------
+
+                !-- INTEGRATE A PRESSURE WEIGHTED AVG DOWN TO SURFACE
+
+                     DO VERTIND = 1, LLPAR
                        IF (VERTIND .eq. LLPAR) THEN
-      !                     PARTVARI(VERTIND) = (STT(I,J,VERTIND,N) *
-      !&                             TCVV(N) / State_Met%AD(I,J,VERTIND))
-      !&                           * (GET_PEDGE(I,J,VERTIND) - 0)
-                          PARTVARI(VERTIND) = (STT(I,J,VERTIND,N) *
-     &                             TCVV(N) / State_Met%AD(I,J,VERTIND))
-     &                           * KERN(VERTIND)
-                       ELSE 
-      !                     PARTVARI(VERTIND) = (STT(I,J,VERTIND,N) * 
-      !&                             TCVV(N) / State_Met%AD(I,J,VERTIND))
-      !&                           * (GET_PEDGE(I,J,VERTIND)-
-      !&                          GET_PEDGE(I,J,VERTIND+1))
-                          PARTVARI(VERTIND) = (STT(I,J,VERTIND,N) *
-     &                             TCVV(N) / State_Met%AD(I,J,VERTIND))
-     &                           * KERN(VERTIND)
+                         PARTVARI(VERTIND) = (STT(I,J,VERTIND,N) *
+     &                    Input_Opt%TCVV(N) / State_Met%AD(I,J,VERTIND))
+     &                           * (GET_PEDGE(I,J,VERTIND) - 0)
+                       ELSE
+                         PARTVARI(VERTIND) = (STT(I,J,VERTIND,N) *
+     &                    Input_Opt%TCVV(N) / State_Met%AD(I,J,VERTIND))
+     &                           * (GET_PEDGE(I,J,VERTIND)-
+     &                          GET_PEDGE(I,J,VERTIND+1))
                        ENDIF
                      ENDDO
 
-      !                VARI(V) = SUM(PARTVARI) / GET_PEDGE(I,J,1)
-                      VARI(V) = SUM(PARTVARI)
-                     !print *,'MM:',M
-                     !print *,'new:',vari(v)
-                     IF ( VARI(V) < TINY ) VARI(V) = 0.d0
+                      VARI(V) = SUM(PARTVARI) / GET_PEDGE(I,J,1)
+                     
+                      IF ( VARI(V) < TINY ) VARI(V) = 0.d0
 
-      !          PBL CALC
-      !           SUMPRESS = 0.0
-      !          DO VERTIND = 1, LLPAR
-!   
-!                IF (VERTIND .eq. LLPAR)  THEN
-!                 PARTVARI(VERTIND) = (STT(I,J,VERTIND,N) *
-!     &                             TCVV(N) / State_Met%AD(I,J,VERTIND))
-!     &                           * (GET_PEDGE(I,J,VERTIND) - 0) *
-!     &                           GET_FRAC_UNDER_PBLTOP( I, J, VERTIND )
-!
-!                 SUMPRESS = SUMPRESS + (GET_PEDGE(I,J,VERTIND) - 0) *
-!     &                          GET_FRAC_UNDER_PBLTOP( I, J, VERTIND )
-!                ELSE
-!                 PARTVARI(VERTIND) = (STT(I,J,VERTIND,N) *
-!     &                             TCVV(N) / State_Met%AD(I,J,VERTIND))
-!     &                           * (GET_PEDGE(I,J,VERTIND)-
-!     &                          GET_PEDGE(I,J,VERTIND+1)) *
-!     &                          GET_FRAC_UNDER_PBLTOP( I, J, VERTIND )
-!                 SUMPRESS = SUMPRESS + (GET_PEDGE(I,J,VERTIND)-
-!     &                          GET_PEDGE(I,J,VERTIND+1)) *
-!     &                          GET_FRAC_UNDER_PBLTOP( I, J, VERTIND )
-!                ENDIF
+                 !---          PBL CALC
 
-      !          PBL CALC
                  SUMPRESS = 0.0
-                DO VERTIND = 1, LLPAR
+                 DO VERTIND = 1, LLPAR
+
+                   IF (VERTIND .eq. LLPAR)  THEN
+                    PARTVARI(VERTIND) = (STT(I,J,VERTIND,N) *
+     &                   Input_Opt%TCVV(N) / State_Met%AD(I,J,VERTIND))
+     &                       * (GET_PEDGE(I,J,VERTIND) - 0) *
+     &                           GET_FRAC_UNDER_PBLTOP( I, J, VERTIND )
+
+                   SUMPRESS = SUMPRESS + (GET_PEDGE(I,J,VERTIND) - 0) *
+     &                          GET_FRAC_UNDER_PBLTOP( I, J, VERTIND )
+                   ELSE
+                   PARTVARI(VERTIND) = (STT(I,J,VERTIND,N) *
+     &                   Input_Opt%TCVV(N) / State_Met%AD(I,J,VERTIND))
+     &                           * (GET_PEDGE(I,J,VERTIND)-
+     &                          GET_PEDGE(I,J,VERTIND+1)) *
+     &                          GET_FRAC_UNDER_PBLTOP( I, J, VERTIND )
+                   SUMPRESS = SUMPRESS + (GET_PEDGE(I,J,VERTIND)-
+     &                          GET_PEDGE(I,J,VERTIND+1)) *
+     &                          GET_FRAC_UNDER_PBLTOP( I, J, VERTIND )
+                  ENDIF
+
+                ENDDO
+
+                     VARIPBL(V) = SUM(PARTVARI) / SUMPRESS
+
+                     IF ( VARIPBL(V) < TINY ) VARI(V) = 0.d0
+
+                !---           FREE TROP CALC
+
+               SUMPRESS = 0.0
+               DO VERTIND = 1, LLPAR
 
                 IF (VERTIND .eq. LLPAR)  THEN
                  PARTVARI(VERTIND) = (STT(I,J,VERTIND,N) *
-     &                             TCVV(N) / State_Met%AD(I,J,VERTIND))
-     &                           * KERN(VERTIND) *
-     &                           GET_FRAC_UNDER_PBLTOP( I, J, VERTIND )
+     &                  Input_Opt%TCVV(N) / State_Met%AD(I,J,VERTIND))
+     &                           * (GET_PEDGE(I,J,VERTIND) - 0) *
+     &                       (1-GET_FRAC_UNDER_PBLTOP( I, J, VERTIND ) )
+
+                 SUMPRESS = SUMPRESS + (GET_PEDGE(I,J,VERTIND) - 0) *
+     &                       (1-GET_FRAC_UNDER_PBLTOP( I, J, VERTIND ) )
+
+                ELSE
+
+                 PARTVARI(VERTIND) = (STT(I,J,VERTIND,N) *
+     &                  Input_Opt%TCVV(N) / State_Met%AD(I,J,VERTIND))
+     &                           * (GET_PEDGE(I,J,VERTIND)-
+     &                          GET_PEDGE(I,J,VERTIND+1)) *
+     &                       (1-GET_FRAC_UNDER_PBLTOP( I, J, VERTIND ) )
+
+                 SUMPRESS = SUMPRESS + (GET_PEDGE(I,J,VERTIND)-
+     &                          GET_PEDGE(I,J,VERTIND+1)) *
+     &                       (1-GET_FRAC_UNDER_PBLTOP( I, J, VERTIND ) )
+                ENDIF
+
+
+               ENDDO
+
+                     VARIFREETROP(V) = SUM(PARTVARI) / SUMPRESS
+                     
+                     IF ( VARIFREETROP(V) < TINY ) VARI(V) = 0.d0
+
+
+            CASE(2)
+
+            !------------------------------------------------------
+            !--  This option is for straight full column weighting by KERN variable
+            !--  Calcs PBL, FREETROP and FULLCOLUMN XCO2
+            !------------------------------------------------------
+
+            !-- INTEGRATE A PRESSURE WEIGHTED AVG DOWN TO CLOUD TOP (or zero for surface)
+
+                     DO VERTIND = 1, LLPAR       
+                       IF (VERTIND .eq. LLPAR) THEN
+                          PARTVARI(VERTIND) = (STT(I,J,VERTIND,N) *
+     &                    Input_Opt%TCVV(N) / State_Met%AD(I,J,VERTIND))
+     &                       * KERN(VERTIND)
+                       ELSE 
+                         PARTVARI(VERTIND) = (STT(I,J,VERTIND,N) *
+     &                   Input_Opt%TCVV(N) / State_Met%AD(I,J,VERTIND))
+     &                    * KERN(VERTIND)
+                       ENDIF
+                     ENDDO
+
+                      VARI(V) = SUM(PARTVARI)
+                     IF ( VARI(V) < TINY ) VARI(V) = 0.d0
+
+
+      !        PBL CALC
+               SUMPRESS = 0.0
+               DO VERTIND = 1, LLPAR
+
+                IF (VERTIND .eq. LLPAR)  THEN
+                 PARTVARI(VERTIND) = (STT(I,J,VERTIND,N) *
+     &                    Input_Opt%TCVV(N) / State_Met%AD(I,J,VERTIND))
+     &                    * KERN(VERTIND) *
+     &                   GET_FRAC_UNDER_PBLTOP( I, J, VERTIND )
 
                  SUMPRESS = SUMPRESS + KERN(VERTIND) *
      &                          GET_FRAC_UNDER_PBLTOP( I, J, VERTIND )
                 ELSE
                  PARTVARI(VERTIND) = (STT(I,J,VERTIND,N) *
-     &                             TCVV(N) / State_Met%AD(I,J,VERTIND))
-     &                           * KERN(VERTIND) *
-     &                          GET_FRAC_UNDER_PBLTOP( I, J, VERTIND )
+     &                    Input_Opt%TCVV(N) / State_Met%AD(I,J,VERTIND))
+     &                     * KERN(VERTIND) *
+     &                     GET_FRAC_UNDER_PBLTOP( I, J, VERTIND )
                  SUMPRESS = SUMPRESS +KERN(VERTIND) *
-     &                          GET_FRAC_UNDER_PBLTOP( I, J, VERTIND )
+     &                      GET_FRAC_UNDER_PBLTOP( I, J, VERTIND )
                 ENDIF
 
+               ENDDO
 
-                !PRINT *,'VERT:',VERTIND,'SUMPRESS:',SUMPRESS
-
-                     ENDDO
-
-                     VARIPBL(V) = SUM(PARTVARI) / SUMPRESS
-              !       print *,'MM:',M
-              !       print *,'new PBL meas:',varipbl(v)
-                     IF ( VARIPBL(V) < TINY ) VARI(V) = 0.d0
+               VARIPBL(V) = SUM(PARTVARI) / SUMPRESS
+               
+               IF ( VARIPBL(V) < TINY ) VARI(V) = 0.d0
 
       !          FREE TROP CALC
                  SUMPRESS = 0.0
                 DO VERTIND = 1, LLPAR
 
-!                IF (VERTIND .eq. LLPAR)  THEN
-!                 PARTVARI(VERTIND) = (STT(I,J,VERTIND,N) *
-!     &                             TCVV(N) / State_Met%AD(I,J,VERTIND))
-!     &                           * (GET_PEDGE(I,J,VERTIND) - 0) *
-!     &                       (1-GET_FRAC_UNDER_PBLTOP( I, J, VERTIND ) )
-!
-!                 SUMPRESS = SUMPRESS + (GET_PEDGE(I,J,VERTIND) - 0) *
-!     &                       (1-GET_FRAC_UNDER_PBLTOP( I, J, VERTIND ) )
-!
-!                ELSE
-!
-!                 PARTVARI(VERTIND) = (STT(I,J,VERTIND,N) *
-!     &                             TCVV(N) / State_Met%AD(I,J,VERTIND))
-!     &                           * (GET_PEDGE(I,J,VERTIND)-
-!     &                          GET_PEDGE(I,J,VERTIND+1)) *
-!     &                       (1-GET_FRAC_UNDER_PBLTOP( I, J, VERTIND ) )
-!
-!                 SUMPRESS = SUMPRESS + (GET_PEDGE(I,J,VERTIND)-
-!     &                          GET_PEDGE(I,J,VERTIND+1)) *
-!     &                       (1-GET_FRAC_UNDER_PBLTOP( I, J, VERTIND ) )
-!                ENDIF
-
                 IF (VERTIND .eq. LLPAR)  THEN
                  PARTVARI(VERTIND) = (STT(I,J,VERTIND,N) *
-     &                             TCVV(N) / State_Met%AD(I,J,VERTIND))
+     &                 Input_Opt%TCVV(N) / State_Met%AD(I,J,VERTIND))
      &                           * KERN(VERTIND) *
      &                       (1-GET_FRAC_UNDER_PBLTOP( I, J, VERTIND ) )
 
@@ -2329,7 +2657,7 @@
                 ELSE
 
                  PARTVARI(VERTIND) = (STT(I,J,VERTIND,N) *
-     &                             TCVV(N) / State_Met%AD(I,J,VERTIND))
+     &                Input_Opt%TCVV(N) / State_Met%AD(I,J,VERTIND))
      &                           * KERN(VERTIND) *
      &                       (1-GET_FRAC_UNDER_PBLTOP( I, J, VERTIND ) )
 
@@ -2337,20 +2665,100 @@
      &                       (1-GET_FRAC_UNDER_PBLTOP( I, J, VERTIND ) )
                 ENDIF
 
-          !      PRINT *,'VERT:',VERTIND,'SUMPRESS:',SUMPRESS
+                ENDDO
 
+                VARIFREETROP(V) = SUM(PARTVARI) / SUMPRESS
+                IF ( VARIFREETROP(V) < TINY ) VARI(V) = 0.d0
+
+            CASE(3)
+
+            !------------------------------------------------------
+            !--  This option is for column weighting by 'pressure_weights'
+            !-- vertical weights given in netcdf file, by observation
+            !--  This only calcs what the observations ask for, no xtra pbl/freetrop
+            !------------------------------------------------------
+
+            !-- INTEGRATE A PRESSURE WEIGHTED AVG DOWN TO CLOUD TOP (or zero for surface)
+
+                     DO VERTIND = 1, LLPAR
+                       IF (VERTIND .eq. LLPAR) THEN
+                          PARTVARI(VERTIND) = (STT(I,J,VERTIND,N) *
+     &                    Input_Opt%TCVV(N) / State_Met%AD(I,J,VERTIND))
+     &                       * PPRESSWGHT(VERTIND,M)
+                       ELSE
+                         PARTVARI(VERTIND) = (STT(I,J,VERTIND,N) *
+     &                   Input_Opt%TCVV(N) / State_Met%AD(I,J,VERTIND))
+     &                    * PPRESSWGHT(VERTIND,M)
+                       ENDIF
                      ENDDO
 
-                     VARIFREETROP(V) = SUM(PARTVARI) / SUMPRESS
-         !            print *,'MM:',M
-         !            print *,'new FREETOP meas:',varifreetrop(v)
-                     IF ( VARIFREETROP(V) < TINY ) VARI(V) = 0.d0
+                      VARI(V) = SUM(PARTVARI)
+                     IF ( VARI(V) < TINY ) VARI(V) = 0.d0
+
+
+      !        PBL CALC
+               SUMPRESS = 0.0
+               DO VERTIND = 1, LLPAR
+
+                IF (VERTIND .eq. LLPAR)  THEN
+                 PARTVARI(VERTIND) = (STT(I,J,VERTIND,N) *
+     &                    Input_Opt%TCVV(N) / State_Met%AD(I,J,VERTIND))
+     &                    * KERN(VERTIND) *
+     &                   GET_FRAC_UNDER_PBLTOP( I, J, VERTIND )
+
+                 SUMPRESS = SUMPRESS + KERN(VERTIND) *
+     &                          GET_FRAC_UNDER_PBLTOP( I, J, VERTIND )
+                ELSE
+                 PARTVARI(VERTIND) = (STT(I,J,VERTIND,N) *
+     &                    Input_Opt%TCVV(N) / State_Met%AD(I,J,VERTIND))
+     &                     * KERN(VERTIND) *
+     &                     GET_FRAC_UNDER_PBLTOP( I, J, VERTIND )
+                 SUMPRESS = SUMPRESS +KERN(VERTIND) *
+     &                      GET_FRAC_UNDER_PBLTOP( I, J, VERTIND )
+                ENDIF
+
+               ENDDO
+
+               VARIPBL(V) = SUM(PARTVARI) / SUMPRESS
+
+               IF ( VARIPBL(V) < TINY ) VARI(V) = 0.d0
+
+      !          FREE TROP CALC
+                 SUMPRESS = 0.0
+                DO VERTIND = 1, LLPAR
+
+                IF (VERTIND .eq. LLPAR)  THEN
+                 PARTVARI(VERTIND) = (STT(I,J,VERTIND,N) *
+     &                 Input_Opt%TCVV(N) / State_Met%AD(I,J,VERTIND))
+     &                           * KERN(VERTIND) *
+     &                       (1-GET_FRAC_UNDER_PBLTOP( I, J, VERTIND ) )
+
+                 SUMPRESS = SUMPRESS + KERN(VERTIND) *
+     &                       (1-GET_FRAC_UNDER_PBLTOP( I, J, VERTIND ) )
+
+                ELSE
+
+                 PARTVARI(VERTIND) = (STT(I,J,VERTIND,N) *
+     &                Input_Opt%TCVV(N) / State_Met%AD(I,J,VERTIND))
+     &                           * KERN(VERTIND) *
+     &                       (1-GET_FRAC_UNDER_PBLTOP( I, J, VERTIND ) )
+
+                 SUMPRESS = SUMPRESS + KERN(VERTIND) *
+     &                       (1-GET_FRAC_UNDER_PBLTOP( I, J, VERTIND ) )
+                ENDIF
+
+                ENDDO
+
+                VARIFREETROP(V) = SUM(PARTVARI) / SUMPRESS
+                IF ( VARIFREETROP(V) < TINY ) VARI(V) = 0.d0
+
+
+        END SELECT
 
                      ! Free pointer
                      NULLIFY( STT )
                      
                      DEALLOCATE(PARTVARI)
-
                   !--------------------------
                   ! Otherwise it's an error!
                   !--------------------------
@@ -2389,35 +2797,272 @@
 
       END SUBROUTINE GOSAT
 !EOC
+
+
+      subroutine interp_linear ( m, data_num, t_data, p_data,interp_num,
+     &          t_interp, p_interp )
+
+!*****************************************************************************80
+!
+!! INTERP_LINEAR: piecewise linear interpolation to a curve in M dimensions.
+!
+!  Discussion:
+!
+!    From a space of M dimensions, we are given a sequence of
+!    DATA_NUM points, which are presumed to be successive samples
+!    from a curve of points P.
+!
+!    We are also given a parameterization of this data, that is,
+!    an associated sequence of DATA_NUM values of a variable T.
+!    The values of T are assumed to be strictly increasing.
+!
+!    Thus, we have a sequence of values P(T), where T is a scalar,
+!    and each value of P is of dimension M.
+!
+!    We are then given INTERP_NUM values of T, for which values P
+!    are to be produced, by linear interpolation of the data we are given.
+!
+!    Note that the user may request extrapolation.  This occurs whenever
+!    a T_INTERP value is less than the minimum T_DATA or greater than the
+!    maximum T_DATA.  In that case, linear extrapolation is used.
+!
+!  Licensing:
+!
+!    This code is distributed under the GNU LGPL license.
+!
+!  Modified:
+!
+!    03 December 2007
+!
+!  Author:
+!
+!    John Burkardt
+!
+!  Parameters:
+!
+!    Input, integer ( kind = 4 ) M, the spatial dimension.
+!
+!    Input, integer ( kind = 4 ) DATA_NUM, the number of data points.
+!
+!    Input, real ( kind = 8 ) T_DATA(DATA_NUM), the value of the
+!    independent variable at the sample points.  The values of T_DATA
+!    must be strictly increasing.
+!
+!    Input, real ( kind = 8 ) P_DATA(M,DATA_NUM), the value of the
+!    dependent variables at the sample points.
+!
+!    Input, integer ( kind = 4 ) INTERP_NUM, the number of points
+!    at which interpolation is to be done.
+!
+!    Input, real ( kind = 8 ) T_INTERP(INTERP_NUM), the value of the
+!    independent variable at the interpolation points.
+!
+!    Output, real ( kind = 8 ) P_INTERP(M,DATA_NUM), the interpolated
+!    values of the dependent variables at the interpolation points.
+!
+       implicit none
+
+       integer ( kind = 4 ) data_num
+       integer ( kind = 4 ) m
+       integer ( kind = 4 ) interp_num
+
+       integer ( kind = 4 ) interp
+       integer ( kind = 4 ) left
+       real ( kind = 8 ) p_data(m,data_num)
+       real ( kind = 8 ) p_interp(m,interp_num)
+       !logical r8vec_ascends_strictly
+       integer ( kind = 4 ) right
+       real ( kind = 8 ) t
+       real ( kind = 8 ) t_data(data_num)
+       real ( kind = 8 ) t_interp(interp_num)
+
+       if ( .not. r8vec_ascends_strictly ( data_num, t_data ) ) then
+         write ( *, '(a)' ) ' '
+         write ( *, '(a)' ) 'INTERP_LINEAR - Fatal error!'
+         write ( *, '(a)' ) 
+     & '  Independent variable array T_DATA is not strictly increasing.'
+         stop 1
+       end if
+
+       do interp = 1, interp_num
+
+         t = t_interp(interp)
+!
+!  Find the interval [ TDATA(LEFT), TDATA(RIGHT) ] that contains, or is
+!  nearest to, TVAL.
+!
+         call r8vec_bracket ( data_num, t_data, t, left, right )
+
+         p_interp(1:m,interp) = 
+     &     ( ( t_data(right) - t                ) * p_data(1:m,left)   
+     &  + (                 t - t_data(left) ) * p_data(1:m,right) ) 
+     &  / ( t_data(right)     - t_data(left) )
+
+       end do
+
+       return
+      end subroutine interp_linear 
+
+      subroutine r8vec_bracket ( n, x, xval, left, right )
+
+!*****************************************************************************80
+!
+!! R8VEC_BRACKET searches a sorted R8VEC for successive brackets of a value.
+!
+!  Discussion:
+!
+!    An R8VEC is an array of double precision real values.
+!
+!    If the values in the vector are thought of as defining intervals
+!    on the real line, then this routine searches for the interval
+!    nearest to or containing the given value.
+!
+!  Licensing:
+!
+!    This code is distributed under the GNU LGPL license.
+!
+!  Modified:
+!
+!    06 April 1999
+!
+!  Author:
+!
+!    John Burkardt
+!
+!  Parameters:
+!
+!    Input, integer ( kind = 4 ) N, length of input array.
+!
+!    Input, real ( kind = 8 ) X(N), an array sorted into ascending order.
+!
+!    Input, real ( kind = 8 ) XVAL, a value to be bracketed.
+!
+!    Output, integer ( kind = 4 ) LEFT, RIGHT, the results of the search.
+!    Either:
+!      XVAL < X(1), when LEFT = 1, RIGHT = 2;
+!      X(N) < XVAL, when LEFT = N-1, RIGHT = N;
+!    or
+!      X(LEFT) <= XVAL <= X(RIGHT).
+!
+       implicit none
+
+       integer ( kind = 4 ) n
+
+       integer ( kind = 4 ) i
+       integer ( kind = 4 ) left
+       integer ( kind = 4 ) right
+       real ( kind = 8 ) x(n)
+       real ( kind = 8 ) xval
+
+       do i = 2, n - 1
+
+         if ( xval < x(i) ) then
+           left = i - 1
+           right = i
+           return
+         end if
+
+        end do
+
+       left = n - 1
+       right = n
+     
+       return
+      end subroutine r8vec_bracket
+
+       function r8vec_ascends_strictly ( n, x )
+
+!*****************************************************************************80
+!
+!! R8VEC_ASCENDS_STRICTLY determines if an R8VEC is strictly ascending.
+!
+!  Discussion:
+!
+!    An R8VEC is a vector of R8 values.
+!
+!    Notice the effect of entry number 6 in the following results:
+!
+!      X = ( -8.1, 1.3, 2.2, 3.4, 7.5, 7.4, 9.8 )
+!      Y = ( -8.1, 1.3, 2.2, 3.4, 7.5, 7.5, 9.8 )
+!      Z = ( -8.1, 1.3, 2.2, 3.4, 7.5, 7.6, 9.8 )
+!
+!      R8VEC_ASCENDS_STRICTLY ( X ) = FALSE
+!      R8VEC_ASCENDS_STRICTLY ( Y ) = FALSE
+!      R8VEC_ASCENDS_STRICTLY ( Z ) = TRUE
+!
+!  Licensing:
+!
+!    This code is distributed under the GNU LGPL license.
+!
+!  Modified:
+!
+!    03 December 2007
+!
+!  Author:
+!
+!    John Burkardt
+!
+!  Parameters:
+!
+!    Input, integer ( kind = 4 ) N, the size of the array.
+!
+!    Input, real ( kind = 8 ) X(N), the array to be examined.
+!
+!    Output, logical R8VEC_ASCENDS_STRICTLY, is TRUE if the
+!    entries of X strictly ascend.
+!
+       implicit none
+
+       integer ( kind = 4 ) n
+
+       integer ( kind = 4 ) i
+       logical r8vec_ascends_strictly
+       real ( kind = 8 ) x(n)
+
+       do i = 1, n - 1
+         if ( x(i+1) <= x(i) ) then
+           r8vec_ascends_strictly = .false.
+           return
+         end if
+       end do
+
+       r8vec_ascends_strictly = .true.
+
+        return
+      end function r8vec_ascends_strictly
+
+!EOC
 !------------------------------------------------------------------------------
-!          Harvard University Atmospheric Chemistry Modeling Group            !
+!                  GEOS-Chem Global Chemical Transport Model                  !
 !------------------------------------------------------------------------------
 !BOP
 !
 ! !IROUTINE: test_valid
 !
-! !DESCRIPTION: Subroutine TEST\_VALID tests to see if we are w/in the 
+! !DESCRIPTION: Subroutine TEST\_VALID tests to see if we are w/in the
 !  tropopause, which is where SMVGEAR chemistry is done.
 !\\
 !\\
 ! !INTERFACE:
 !
-      SUBROUTINE TEST_VALID( IND, PCHEM, JLOOP, I, J, L ) 
+      SUBROUTINE TEST_VALID( IND, PCHEM, JLOOP,I, J, L,
+     &                        Input_Opt )
 !
 ! !USES:
 !
-      USE COMODE_MOD,     ONLY : JLOP
-      USE PRESSURE_MOD,   ONLY : GET_PEDGE
-      USE TRACER_MOD,     ONLY : ITS_A_FULLCHEM_SIM
-      USE TROPOPAUSE_MOD, ONLY : ITS_IN_THE_TROP
-      USE GRID_MOD,       ONLY : GET_XOFFSET
-      USE GRID_MOD,       ONLY : GET_YOFFSET
+      USE CMN_SIZE_MOD
+      USE COMODE_MOD,         ONLY : JLOP
+      USE PRESSURE_MOD,       ONLY : GET_PEDGE
+      USE GRID_MOD,           ONLY : GET_XOFFSET
+      USE GRID_MOD,           ONLY : GET_YOFFSET
+      USE GIGC_Input_Opt_Mod, ONLY : OptInput
+!
+! !INPUT PARAMETERS:
+!
+      INTEGER,        INTENT(IN) :: IND         ! # of the flight track point
+      TYPE(OptInput), INTENT(IN) :: Input_Opt   ! Input Options object
 
-      USE CMN_SIZE_MOD                ! Size parameters
-!
-! !INPUT PARAMETERS: 
-!
-      INTEGER, INTENT(IN)  :: IND     ! # of the flight track point
+
 !
 ! !OUTPUT PARAMETERS:
 !
@@ -2426,20 +3071,22 @@
       INTEGER, INTENT(OUT) :: I       ! GEOS-Chem longitude index
       INTEGER, INTENT(OUT) :: J       ! GEOS-Chem latitude index
       INTEGER, INTENT(OUT) :: L       ! GEOS-Chem level index
-! 
-! !REVISION HISTORY: 
+!
+! !REVISION HISTORY:
 !  08 Jul 2002 - M. Evans    - Initial version
 !  (1 ) Now use GET_PEDGE of "pressure_mod.f" to return the pressure at the
 !        bottom edge of box (I,J,L), for hybrid grid. (dsa, bdf, bmy, 8/21/02)
-!  (2 ) Since JLOP is not allocated for non-SMVGEAR runs, set PCHEM=F and 
+!  (2 ) Since JLOP is not allocated for non-SMVGEAR runs, set PCHEM=F and
 !        JLOOP=0 even if we are in the troposphere. (bmy, 7/18/03)
 !  (3 ) Bug fix: add 0.5 in expression for I so that the rounding will
 !        be done correctly.  Also make sure that I is computed correctly
 !	 for points near the date line.  (bmy, 4/23/04)
 !  (4 ) Now references ITS_A_FULLCHEM_SIM from "tracer_mod.f" (bmy, 7/20/04)
 !  (5 ) Now references ITS_IN_THE_TROP from "tropopause_mod.f" (bmy, 8/22/05)
+!  (6 ) Reference GET_XOFFSET and GET_YOFFSET from "grid_mod.f" and also
+!        add for the case of nested-grid simulation (win, 7/28/09)
 !  29 Jul 2011 - R. Yantosca - Added ProTeX headers
-!  08 Sep 2011 - L. Schiferl - Added correct definitions for I and J 
+!  08 Sep 2011 - L. Schiferl - Added correct definitions for I and J
 !                              based on nested regions
 !EOP
 !------------------------------------------------------------------------------
@@ -2458,29 +3105,33 @@
       ! We have not found a valid point
       FOUND = .FALSE.
 
-      ! Added correct definitions for I and J based on nested regions 
+      ! Added correct definitions for I and J based on nested regions
       ! (lds, 8/25/11)
       I0 = GET_XOFFSET( GLOBAL=.TRUE. )
       J0 = GET_YOFFSET( GLOBAL=.TRUE. )
 
       ! Get I corresponding to PLON(IND)
-      I = INT( ( PLON(IND) + 180d0 - (I0 * DISIZE) ) / DISIZE + 1.5d0 )
+      I = INT( ( PLON(IND) + 180e+0 - (I0 * DISIZE) ) / DISIZE
+     &     + 1.5e+0 )
 
       ! Handle date line correctly (bmy, 4/23/04)
       IF ( I > IIPAR ) I = I - IIPAR
 
       ! Get J corresponding to PLAT(IND)
-      J = INT( ( PLAT(IND) +  90d0 - (J0 * DJSIZE) ) / DJSIZE + 1.5d0 )
+      J = INT( ( PLAT(IND) +  90e+0 - (J0 * DJSIZE) ) / DJSIZE
+     &     + 1.5e+0 )
 
       ! Get L corresponding to PRESS(IND)
-      L = 1
-      DO IL = 1, LLPAR
-         IF ( GET_PEDGE(I,J,IL) <= PPRESS(IND) .AND..NOT. FOUND ) THEN
-            L     = IL-1
-            FOUND =.TRUE.
-            EXIT
-         ENDIF          
-      ENDDO
+      !L = 1
+      !DO IL = 1, LLPAR
+      !   IF ( GET_PEDGE(I,J,IL) <= PPRESS(IND) .AND..NOT. FOUND ) THEN
+      !      L     = IL-1
+      !      FOUND =.TRUE.
+      !      EXIT
+      !   ENDIF
+      !ENDDO
+
+
 
       ! Error check: L must be 1 or higher
       IF ( L == 0 ) L = 1
@@ -2488,16 +3139,16 @@
       !=================================================================
       ! We only do full-chemistry in the troposphere
       !=================================================================
-      IF ( ITS_A_FULLCHEM_SIM() ) THEN
-  
-         ! JLOOP indicates if a box is in tropo (/=0) or not. 
+      IF ( Input_Opt%ITS_A_FULLCHEM_SIM ) THEN
+
+         ! JLOOP indicates if a box is in chemgrid (/=0) or not.
          JLOOP = JLOP(I,J,L)
          PCHEM = .TRUE.
 
       ELSE
 
          ! For non-SMVGEAR runs, JLOOP has no meaning so we give the
-         ! stratospheric value
+         ! false value
          JLOOP = 0
          PCHEM = .FALSE.
 
@@ -2564,7 +3215,7 @@
      &       F8.3,X,F7.2,X,200(es15.7e3,x))
 
 
-      PRINT *,'PXCO2:',PXCO2(IND)
+      !PRINT *,'PXCO2:',PXCO2(IND)
       WRITE( *, 110, IOSTAT=IOS )
      &     IND, PTYPE(IND), INT( PDATE(IND) ), INT( PTIME(IND) ),
      &     PLAT(IND), PLON(IND), PPRESS(IND), PXCO2(IND), PERR(IND),
@@ -2728,11 +3379,12 @@
 !\\
 ! !INTERFACE:
 !
-      SUBROUTINE SET_GOSAT( GOSAT, IN_FILE, OUT_FILE )
+      SUBROUTINE SET_GOSAT( GOSAT, IN_FILE, OUT_FILE, VERTOPT )
 !
 ! !INPUT PARAMETERS: 
 !
-      LOGICAL,            INTENT(IN) :: GOSAT         ! Turn on GOSAT diag?
+      INTEGER,            INTENT(IN) :: VERTOPT    ! vertical integrate option
+      LOGICAL,            INTENT(IN) :: GOSAT      ! Turn on GOSAT diag?
       CHARACTER(LEN=255), INTENT(IN) :: IN_FILE    ! Input file to read
       CHARACTER(LEN=255), INTENT(IN) :: OUT_FILE   ! Output file to write
 ! 
@@ -2744,10 +3396,12 @@
 !BOC
 
       ! Save arguments to "shadow" module variables
-      DO_GOSAT       = GOSAT
+      VERTINTOPT  = VERTOPT
+      DO_GOSAT    = GOSAT
       INFILENAME  = TRIM( IN_FILE  )
       OUTFILENAME = TRIM( OUT_FILE )
 
+      PRINT *,'SETTING VERTINTOPT:',VERTINTOPT,' to VERTOPT:',VERTOPT
       END SUBROUTINE SET_GOSAT
 !EOC
 !------------------------------------------------------------------------------
@@ -2818,8 +3472,9 @@
       !=================================================================
 
       NPOINTS = 0
-
+      print *,'start readgosat'
       CALL readGOSATlength( trim (INF) , NPOINTS)
+      print *,'done readgosat'
 
       ! If there are no flight-track points then just return
       IF ( NPOINTS < 1 ) THEN
@@ -2888,6 +3543,18 @@
          ALLOCATE( PPRESS( MAXPOINTS ), STAT=AS )
          IF ( AS /= 0 ) CALL ALLOC_ERR( 'PPRESS' )
 
+         ALLOCATE( PPRESSWGHT( 47, MAXPOINTS ), STAT=AS )
+         IF ( AS /= 0 ) CALL ALLOC_ERR( 'PPRESSWGHT' )
+
+         ALLOCATE( PAK( 20, MAXPOINTS), STAT=AS )
+         IF ( AS /= 0 ) CALL ALLOC_ERR( 'PAK' )
+
+         ALLOCATE( POCO2_PR( 20, MAXPOINTS), STAT=AS )
+         IF ( AS /= 0 ) CALL ALLOC_ERR( 'POCO2_PR' )
+
+         ALLOCATE( POCO2_PRESS( 20, MAXPOINTS), STAT=AS )
+         IF ( AS /= 0 ) CALL ALLOC_ERR( 'POCO2_PRESS' )
+
          ALLOCATE( PERR( MAXPOINTS ), STAT=AS )
          IF ( AS /= 0 ) CALL ALLOC_ERR( 'PERR' )
  
@@ -2915,6 +3582,10 @@
       PLAT   = 0e0
       PLON   = 0e0
       PPRESS = 0e0
+      PPRESSWGHT  = 0e0
+      PAK         = 0e0
+      POCO2_PR    = 0e0
+      POCO2_PRESS = 0e0
       PID    = '              '
 
       END SUBROUTINE INIT_GOSAT
@@ -2958,6 +3629,10 @@
       IF ( ALLOCATED( PLAT   ) ) DEALLOCATE( PLAT   )
       IF ( ALLOCATED( PLON   ) ) DEALLOCATE( PLON   )
       IF ( ALLOCATED( PPRESS ) ) DEALLOCATE( PPRESS )
+      IF ( ALLOCATED( PPRESSWGHT ) ) DEALLOCATE( PPRESSWGHT )
+      IF ( ALLOCATED( PAK ) ) DEALLOCATE( PAK )
+      IF ( ALLOCATED( POCO2_PR ) ) DEALLOCATE( POCO2_PR )
+      IF ( ALLOCATED( POCO2_PRESS ) ) DEALLOCATE( POCO2_PRESS )
       IF ( ALLOCATED( PERR   ) ) DEALLOCATE( PERR   )
       IF ( ALLOCATED( PXCO2  ) ) DEALLOCATE( PXCO2  )
       IF ( ALLOCATED( PID    ) ) DEALLOCATE( PID  )

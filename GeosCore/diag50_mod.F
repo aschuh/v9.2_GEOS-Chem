@@ -1517,8 +1517,6 @@
          !&                      REAL( Q(1:ND50_NI, 1:ND50_NJ, 1:GMNL, W)))
          !#endif
 
-#if   defined( USE_NCDF4 )
-
             CALL handleerror(nf90_open(trim(FILENAME)//'.nc',NF90_WRITE,
      &                        fNCID))
 
@@ -1545,8 +1543,6 @@
        !print *,'closing netcdf....'
        CALL  handleError(nf90_close(fNCID))
 
-#endif
-
       !    ELSE
       !       CALL BPCH2( IU_ND50,      MODELNAME,    LONRES,   
       !&                  LATRES,       HALFPOLAR,    CENTER180, 
@@ -1565,7 +1561,6 @@
 
       ! Close file
       !IF ( LND50_HDF ) THEN
-#if   defined( USE_HDF5 ) ||  defined( USE_NCDF4)
          ! Only include this if we are linking to HDF5 library (bmy, 12/21/09)
          !CALL CLOSE_HDF( IU_ND50_HDF )
 
@@ -1573,7 +1568,6 @@
       deallocate(LONS_NC)
       deallocate(LEVS_NC)
 
-#endif
       !ELSE 
       !   CLOSE( IU_ND50 )
       !ENDIF

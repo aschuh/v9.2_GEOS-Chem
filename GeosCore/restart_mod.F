@@ -378,8 +378,6 @@
          ! Close file
          !CLOSE( IU_RST )
 
-#if   defined( USE_NCDF4 )
-
             CALL handleerror(nf90_open(trim(FILENAME),NF90_WRITE,
      &                        fNCID))
 
@@ -412,7 +410,6 @@
       deallocate(LEVS_NC)
 
       DEALLOCATE(TRACERNAMES)
-#endif
 
       ! Free pointer
       NULLIFY( STT )

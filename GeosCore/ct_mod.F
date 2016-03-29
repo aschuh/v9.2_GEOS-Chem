@@ -300,6 +300,17 @@
       !CALL YMD_EXTRACT( YYYYMMDD1, YYYY1, MM1, DD1 )
       !------------
 
+      !---------------
+      !-- THIS WILL BE FUTURE WAY TO CODE FILENAMES, CURRENTLY THE OUTPUT FILES 
+      !-- ARE TAGGED ONE DAY IN ADVANCE, THIS SHOULD CORRECT THAT RETURNING
+      !-- THE CORRECT DAY ... MIN/HR MIGHT BE WRONG
+      !-- NEED TO TEST THOUGH***
+      !NYMD = GET_TIME_AHEAD(-1440)
+      !DAYBEHIND = GET_TIME_AHEAD(-1440*2 )
+      !DAYAHEAD = GET_TIME_AHEAD(0 )
+      !------------
+
+
       ! Copy file names to local variables
       INF1   = INFILENAME
       INF2  = INFILENAME
@@ -347,7 +358,7 @@
       !PRINT *,'value of FIRST:',FIRST
       IF ( .not. FIRST ) THEN
        !-- WRITE OUTPUT OBJ1 TO FILE and THEN MOVE OUTPUT2 to OUTPUT1
-       !PRINT *, 'length:',SIZE(CT_Input_1%VALUE)
+       !PRINT *, 'flask:',CT_Output_1%FLASK(:,1)
        !PRINT *, 'IDS:',CT_Input_1%ID(1:100,1:100)
        TEST = CT_Input_1%NPOINTS
        CALL WRITE_OUTPUT(OUTF1, CT_Input_1, CT_Output_1, TEST )
@@ -1201,21 +1212,21 @@
          !==============================================================
 
          !PRINT *,'TRY THIS:'
-         CALL  CALDATE( 2440586.5_8, YYYYMMDD, HHMMSS )
+         CALL  CALDATE( 2440587.5_8, YYYYMMDD, HHMMSS )
          !         PRINT *,'YYYYMMDD:HHMMSS',YYYYMMDD,':',HHMMSS
 
          JULNDAY = REAL(CT_Input%TIME(N),8)/86400. + 2440587.5
          JULNDAY_START = REAL(TIM_START(N),8)/86400. + 2440587.5
          JULNDAY_END = REAL(TIM_END(N),8)/86400. + 2440587.5
 
-         IF(N .eq. 1) THEN
-        !PRINT *,'FIRST JULDAY:', REAL(CT_Input%TIME(N),8)/86400._8 
-        !&   + 2440587.5_8
-        !PRINT *,'FIRST JUL_START:',REAL(P_TAU_START(N),8)/86400._8 
-        !&   + 2440587.5_8
-        !PRINT *,'FIRST JUL_END:', REAL(P_TAU_END(N),8)/86400._8
-        !&    + 2440587.5_8
-         END IF
+         !IF(N .eq. 1) THEN
+         !PRINT *,'FIRST JULDAY:', REAL(CT_Input%TIME(N),8)/86400._8 
+         !&   + 2440587.5_8
+         !PRINT *,'FIRST JUL_START:',REAL(P_TAU_START(N),8)/86400._8 
+         !&   + 2440587.5_8
+         !PRINT *,'FIRST JUL_END:', REAL(P_TAU_END(N),8)/86400._8
+         !&    + 2440587.5_8
+         !END IF
 
          !PRINT *,'JULNDAY:',JULNDAY,' TIM:',CT_Input%TIME(N)
          CALL CALDATE( JULNDAY, YYYYMMDD, HHMMSS )
@@ -1303,6 +1314,12 @@
 
          P_TAU_END(N) = GET_TAU0( QMM_END, QDD_END, QYY_END,
      &                            QHH_END, QMN_END, 0 )
+
+         !-- Have to LOOK AT THIS, the numbers being calc'd for the obspack
+         !-- data via GET_TAU0 seem to be off by one day
+
+         P_TAU_START(N) = P_TAU_START(N) !+ 24
+         P_TAU_END(N) = P_TAU_END(N)     !+ 24
 
          !==============================================================
          ! Read lon/lat/alt coordinates -- also do error checks
@@ -1866,7 +1883,12 @@
          ! We have found a plane point at the proper time & location!
          !==============================================================
          !ELSE
-          
+
+            !PRINT *,'WRITING ',M,'th POINT'
+            !PRINT *,'P_TAU_START(M):',P_TAU_START(M)
+            !PRINT *,'PTAUS:',PTAUS
+            !PRINT *,'PTAUE:',PTAUE
+            ! PRINT *,'P_TAU_END(M):',P_TAU_END(M)          
          IF (P_TAU_START(M) <= PTAUS .and. P_TAU_END(M) >= PTAUE ) THEN
             !PRINT *,'BINGO!!!!!!!!!'
             !PRINT *,'WRITING ',M,'th POINT'
@@ -2984,7 +3006,7 @@
 !BOC
       !CALL ncCTOutputClose
 
-      PRINT *,'NSAMP:',NSAMP
+      !PRINT *,'NSAMP:',NSAMP
       IF ( ALLOCATED( NSAMP ) ) DEALLOCATE ( NSAMP )
       IF ( ALLOCATED( CUR_CONC ) ) DEALLOCATE ( CUR_CONC )
       IF ( ALLOCATED( SAMP_STRATEGY ) ) DEALLOCATE ( SAMP_STRATEGY )

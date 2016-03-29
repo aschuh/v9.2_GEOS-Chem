@@ -323,6 +323,12 @@
       ! Create the netCDF file
       !=========================================================================
 
+
+      !PRINT *,'flask data:',Out_Carbontracker%flask(1:NPOINTS,1)
+      !print *,'#avg samps:',Out_Carbontracker%averaging_time(1:NPOINTS)
+      !print *,'strategy:', In_Carbontracker%Sampling_strategy(1:NPOINTS)
+      !print *,'tau_start:', In_Carbontracker%TAU_START(1:NPOINTS)
+      !print *,'tau_end:', In_Carbontracker%TAU_END(1:NPOINTS)
       ! Echo info
       WRITE( 6, '(a)' ) '=== Begin netCDF file creation test ==='
       PRINT *,'WRITING ',NPOINTS,' observations'

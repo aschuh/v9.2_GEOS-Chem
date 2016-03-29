@@ -98,6 +98,7 @@
       PRIVATE :: READ_BBIO_DAILYAVERAGE
       PRIVATE :: READ_BBIO_DIURNALCYCLE
       PRIVATE :: READ_BBIO_SIB_HOURLY
+      PRIVATE :: READ_BBIO_SIB_HARMONIC
       PRIVATE :: READ_KAWA_GENERIC_3HR_FLUX
       PRIVATE :: READ_ODA_FOSSILCO2
       PRIVATE :: TOTAL_BIOMASS_TG
@@ -148,6 +149,8 @@
       REAL*8,  ALLOCATABLE :: EMIS_SUB(:,:)
 
       REAL*8,  ALLOCATABLE, SAVE :: CHEMSRC(:,:,:) !dbj, msl
+
+      CHARACTER(LEN=255)     :: FILENAME
 !
 ! !DEFINED PARAMETERS:
 !
@@ -191,9 +194,13 @@
       USE TIME_MOD,           ONLY : GET_YEAR,      GET_TS_CHEM
       USE TIME_MOD,           ONLY : GET_TS_EMIS 
       USE TIME_MOD,           ONLY : ITS_A_NEW_DAY, ITS_A_NEW_MONTH
+      USE TIME_MOD,           ONLY : GET_NYMDb, YMD_EXTRACT
       USE TRACERID_MOD,       ONLY : IDBCO2
       USE REGRID_1x1_MOD,     ONLY : INIT_REGRID_1x1,CLEANUP_REGRID_1x1
       USE ENKF_MOD,           ONLY : RERUN
+      USE CTFORMAT,           ONLY : STR
+      USE CHARPAK_MOD,        ONLY : StrSplit
+      USE ENKF_MOD,           ONLY : BIASFILE
 !
 ! !INPUT PARAMETERS:
 !
@@ -241,9 +248,14 @@
       ! Local variables
       INTEGER                :: I,     IJLOOP, J,    L,     N,   NN
       INTEGER                :: DAY,   DOY,    HOUR, MONTH, YEAR   
+      INTEGER                :: NYMDb, YYYY, MM, DD
       INTEGER                :: out_unit
       REAL*8                 :: A_CM2, DTSRCE, E_CO2
       REAL*8                 :: biomass_sum, bionet_sum
+
+      ! Needed for mass output files
+      CHARACTER(50)                    :: RESULT(250)
+      INTEGER                          :: N_SUBSTRS
 
       ! Pointers
       ! We need to define local arrays to hold corresponding values 
@@ -445,10 +457,11 @@
          ENDIF
 
       ELSEIF ( LSIBBIOHOURLY ) THEN
-         write(*,*)  '*** USING SIB HOURLY NEE ***'
+         write(*,*)  '*** USING SIB 3-HOURLY NEE ***'
          ! ... otherwise use constant daily emissions of NEP for Bal Bio
-         IF ( MOD( HOUR, 1 ) == 0 ) THEN
-            CALL READ_BBIO_SIB_HOURLY( MONTH, DAY, HOUR )
+         IF ( MOD( HOUR, 3 ) == 0 ) THEN
+            !CALL READ_BBIO_SIB_HOURLY( MONTH, DAY, HOUR )
+             CALL READ_BBIO_SIB_HARMONIC( MONTH, DAY, HOUR )
          ENDIF
          
       ENDIF
@@ -460,6 +473,13 @@
       !----------------------------------------------------------------
       IF ( ITS_A_NEW_MONTH() ) THEN 
 	
+
+         !IF ( LSIBBIOHOURLY ) THEN
+         !write(*,*)  '*** USING SIB MONTHLY NEE ***'
+         ! ... otherwise use constant daily emissions of NEP for Bal Bio
+         !    CALL READ_BBIO_SIB_HARMONIC( MONTH, DAY, HOUR )
+         !ENDIF
+
          ! Fossil fuel emissions
          IF ( LMONFF .OR. LANNFF .OR. LGENFF ) THEN
             CALL READ_FOSSILCO2( am_I_Root, Input_Opt, RC )
@@ -500,6 +520,10 @@
       !=================================================================
       ! Process emissions and save diagnostics
       !=================================================================
+
+       !PRINT *,'FFF1:',EMBIOCO2(:,32)
+       !PRINT *,'FFF2:',EMBIOCO2(:,25)
+
 !$OMP PARALLEL DO
 !$OMP+DEFAULT( SHARED )
 !$OMP+PRIVATE( I, J, L, A_CM2, E_CO2 )  ! dbj
@@ -860,15 +884,37 @@
       ENDDO
       ENDDO
 !$OMP END PARALLEL DO
-      DO L  =  1,SIZE(STT,DIM=4)-1 
-         print *,L,': Total CO2(kg):',sum(STT(:,:,:,l))
-         if (RERUN) then 
-         open (unit=out_unit,file="/discover/nobackup/aschuh/"//
-     &    "results.txt",action="write",status="unknown",access="append")
-          write (out_unit,*) "Tracer:",L," ",sum(STT(:,:,:,l))
-          close (out_unit)
-         endif
-      ENDDO
+
+!         NYMDb = GET_NYMDb()
+!         CALL YMD_EXTRACT( NYMDb, YYYY, MM, DD )
+!         PRINT *,'YYYY:',YYYY
+!         CALL StrSplit( TRIM(BIASFILE), '/',
+!     &     RESULT, N_SUBSTRS )
+!         PRINT *,'RESULT:',RESULT
+!         PRINT *,'N_SUBSTRS:',N_SUBSTRS
+!         FILENAME = ''
+!         DO L = 1,N_SUBSTRS-2
+!           FILENAME = TRIM(FILENAME) // '/' // TRIM(RESULT(L))
+!         ENDDO
+!         PRINT *,'FNAME:',FILENAME
+!         FILENAME = TRIM(FILENAME) // '/diags/mass_diag_' 
+!     &  // trim(str(YYYY)) // '.' // trim(str(MM)) // '.' //
+!     &    trim(str(DD)) // '.txt'
+!
+!         PRINT *,'Using filename for mass:',FILENAME
+!
+!         out_unit = 10
+!         
+!         DO L  =  1,SIZE(STT,DIM=4)-1 
+!         print *,L,': Total CO2(kg):',sum(STT(:,:,:,l))
+!         if (RERUN) then 
+!         open (unit=out_unit,file=TRIM(FILENAME),
+!     &    action="write",status="unknown",access="append")
+!          write (out_unit,*) "Tracer:",L," ",sum(STT(:,:,:,l))
+!          close (out_unit)
+!         endif
+!         ENDDO
+
       ! Free pointer
       NULLIFY( STT )
 
@@ -1205,7 +1251,7 @@
       !=================================================================
 
 !     Need a fairly generic file name
-      FF_FILENAME = TRIM( FOSSIL_DIR ) // 'oddy_v3.1_2.5x2d_' //
+      FF_FILENAME = TRIM( FOSSIL_DIR ) // 'oddy_v3.1_5x4d_' //
      &              CYEAR // '.nc'
 
 !     Old stuff
@@ -3771,8 +3817,343 @@
 
       END SUBROUTINE READ_CT_3HR_FLUX
 !EOC
+!------------------------------------------------------------------------------
+!                        Colorado State University and                        !
+!                        University of Toronto and                            !
+!          Harvard University Atmospheric Chemistry Modeling Group            !
+!------------------------------------------------------------------------------
+!BOP
+!
+! !IROUTINE: read_bbio_sib_harmonic
+!
+! !DESCRIPTION: Subroutine READ\_BBIO\_SIB\_HARMONIC reads SiB hourly
+!  Respiration and GPP and computes NEE
+!\\
+!\\
+! !INTERFACE:
+!
+      SUBROUTINE READ_BBIO_SIB_HARMONIC( MONTH, DAY, HOUR )
+!
+! !USES:
+!
+      USE DIRECTORY_MOD,    ONLY : SIB_DIR,DATA_DIR_1x1
+      USE NCCOOARDSFORMAT,  ONLY : readVar2D, readensVar2D
+      USE TRANSFER_MOD,     ONLY : TRANSFER_2D
+      USE TIME_MOD,         ONLY : GET_YEAR,ITS_A_LEAPYEAR
+      USE TIME_MOD,         ONLY : GET_ELAPSED_MIN,GET_DAY_OF_YEAR
+      USE ENKF_MOD,         ONLY : LBIAS, BIASFILE, ENUMBER, LENKF
+      USE ENKF_MOD,         ONLY : CYCLE_LEN, LLAG
+      USE ENKF_MOD,         ONLY : BIASFILEIN, RERUN, LAG_NUM, CYCLE_NUM
+      USE ENKF_MOD,        ONLY : PFT,FLUX_TYPE,HARMONIC,TRANSCOM_REGION
+      USE CMN_SIZE_MOD      ! Size parameters
 
+      USE REGRID_1x1_MOD,   ONLY : DO_REGRID_G2G_1x1, DO_REGRID_1x1
+      USE REGRID_A2A_MOD,     ONLY : DO_REGRID_A2A
 
+      USE m_netcdf_io_close
+      USE m_netcdf_io_open
+      USE m_netcdf_io_read
+      USE m_netcdf_io_get_dimlen
+      USE m_do_err_out
+      USE m_netcdf_io_checks
+
+!
+! !INPUT PARAMETERS:
+!
+      INTEGER, INTENT(IN) :: MONTH   ! Current month (1-12)
+      INTEGER, INTENT(IN) :: DAY     ! Current day (1-31)
+      INTEGER, INTENT(IN) :: HOUR    ! Current hour (0-23)
+!
+! !REMARKS:
+!  References
+!  (1 ) Olsen and Randerson (2004), Differences between surface and column
+!        atmospheric CO2 and implications for carbon cycle research, J.
+!        Geophys. Res., 109, D02301,
+!  (2 ) Potter et al. (1993), terrestrial Ecosystem Production: A process
+!        model based on global satellite and surface data, Glob. Biogeochem.
+!        Cycles, 7(4), 811-841.
+!
+! !REVISION HISTORY:
+!  16 Aug 2005 - P. Suntharalingam   - Initial version
+!  18 May 2010 - R. Nassar, D. Jones - Added fixes for leapyears
+!EOP
+!------------------------------------------------------------------------------
+!BOC
+!
+! !LOCAL VARIABLES:
+!
+      INTEGER                :: YEAR, LAG_NUM_NEW, XDAY
+      INTEGER                :: I,J,K
+      REAL*4                 :: XREAL
+      REAL*4                 :: DAY_DIVISOR
+      INTEGER                :: PFT_REF(360,180,10)
+      REAL                   :: TRANSCOM_REGS(360,180)
+      INTEGER                :: NCID
+      REAL*4                 :: PFT_AREA(360,180,10)
+      REAL*4                 :: RARRAY(360,180,10,1)
+      REAL*4                 :: AARRAY(360,180,10,1)
+      REAL*4                 :: GPPBIAS(IIPAR,JJPAR,1)
+      REAL*4                 :: RESPBIAS(IIPAR,JJPAR,1)
+      REAL*4                 :: NEEARRAY(360,180)
+      CHARACTER(LEN=255)     :: FLX_FILENAME, TRANSCOM_FILENAME
+      CHARACTER(LEN=255)     :: CURRENT_BIASFILE
+      CHARACTER(LEN=255)     :: ASSIM_FILENAME,RESP_FILENAME
+      CHARACTER(LEN=255)     :: GPP_BIAS_FILENAME,Resp_BIAS_FILENAME
+      CHARACTER(LEN=4)       :: CYEAR
+      CHARACTER(LEN=2)       :: CMONTH
+      CHARACTER(LEN=3)       :: CCYCLE_NUM, CLAG_NUM
+
+      CHARACTER(LEN=255)     :: LLFILENAME
+
+      REAL*8, TARGET     :: GEOS_1x1(I1x1,J1x1,1)    !(lmw,05/16/11)
+      REAL*8, TARGET     :: GEOS_GRID(IIPAR,JJPAR,1)
+
+      REAL*8, POINTER    :: INGRID(:,:)  => NULL()
+      REAL*8, POINTER    :: OUTGRID(:,:) => NULL()
+
+      REAL*8,  TARGET     :: GEN_1x1  (I1x1, J1x1-1,1)
+      REAL, PARAMETER :: PI = 3.1415927
+
+      !=================================================================
+      ! READ_BBIO_SIB_HOURLY begins here!
+      !=================================================================
+
+      YEAR   = GET_YEAR()    ! dbj
+
+      ! Create string for day of year
+       WRITE( CYEAR, '(i4)' ) YEAR
+       WRITE( CMONTH, '(i2.2)' ) MONTH
+
+      FLX_FILENAME = TRIM( SIB_DIR ) // 'sib4_1deg_0014.lu.nc' 
+      TRANSCOM_FILENAME = TRIM( SIB_DIR ) // 'regions.nc'
+
+      !-- READING TRANSCOM
+
+      CALL Ncop_Rd( NCID, trim(TRANSCOM_FILENAME) )
+
+      ! Echo file name to stdout
+      WRITE( 6, 100 ) TRIM( TRANSCOM_FILENAME )
+ 100  FORMAT( '     - READ_TRANSCOM Reading ', a )
+
+      CALL Ncrd(TRANSCOM_REGS(:,:), ncid,'transcom_regions',
+     &       (/ 1,1 /), (/ 360,180 /))
+
+      CALL Nccl( NCID )
+
+      PRINT *,'done w/ Transcom read'
+
+      ! Echo file name to stdout
+      WRITE( 6, 200 ) TRIM( FLX_FILENAME )
+ 200  FORMAT( '     - READ_BBIO_SIB_HOURLY: Reading ', a )
+
+      !-----------------------------------------------------------------
+      ! Read SiB Fluxes [umolC m^-2 s^-1] from disk
+      ! The SiB fluxes use atmospheric convention:
+      ! positive = into atm; negative = into biosphere
+      !-----------------------------------------------------------------
+      !print *,'time:',(DAY-1)*24+HOUR+1
+
+      !-- READING FLUXES
+
+      CALL Ncop_Rd( NCID, trim(FLX_FILENAME) )
+
+      CALL Ncrd(PFT_REF(:,:,:), ncid,'pft_ref',
+     &       (/ 1,1,1 /), (/ 360,180,10 /))
+
+      PRINT *,'PFT AMZ:',PFT_REF(100:110,85:95,1)
+
+      CALL Ncrd(PFT_AREA(:,:,:), ncid,'pft_area',
+     &       (/ 1,1,1 /), (/ 360,180,10 /))
+
+      PRINT *,'AREA AMZ:',PFT_AREA(100:110,85:95,1)
+
+      CALL Ncrd(RARRAY(:,:,:,1), ncid,'resp_balanced',
+     &       (/ 1,1,1,MONTH /), (/ 360,180,10,1 /))
+
+      CALL Ncrd(AARRAY(:,:,:,1), ncid,'assim',
+     &       (/ 1,1,1,MONTH /), (/ 360,180,10,1 /))
+
+      PRINT *,'ASSIM AMZ:',AARRAY(100:110,85:95,1,1)
+
+      CALL Nccl( NCID )
+
+      DO K = 1, 10 
+        DO J = 1, 180
+          DO I = 1, 360
+             IF(PFT_REF(I,J,K) /= PFT .OR. NINT(TRANSCOM_REGS( I,J )) 
+     &                   /= TRANSCOM_REGION) THEN
+            !PRINT *,'NINT(TRANSCOM_REGS( I,J ):',NINT(TRANSCOM_REGS( I,J ))
+            !PRINT *,'TRANSCOM_REGION:',TRANSCOM_REGION
+            !IF(NINT(TRANSCOM_REGS( I,J )) /= TRANSCOM_REGION) THEN
+            !  PRINT *,'PFT:',PFT
+            !  PRINT *,'PFTREF:',PFT_REF(I,J,K)
+            !ENDIF
+                RARRAY(I,J,K,1) = 0. 
+                AARRAY(I,J,K,1) = 0.
+            ELSE
+             !PRINT *,'good data, i:',i,' j:',j,' k:',k
+             !PRINT *,'PFT_REF:',PFT_REF(I,J,K)
+             !PRINT *,'PFT:',PFT
+                RARRAY(I,J,K,1) = RARRAY(I,J,K,1) * PFT_AREA(I,J,K)
+                AARRAY(I,J,K,1) = AARRAY(I,J,K,1) * PFT_AREA(I,J,K)
+            ENDIF
+
+          ENDDO
+        ENDDO
+      ENDDO
+
+      !PRINT *,'R test flux:',RARRAY(:,128,2,1)
+      !PRINT *,'A test flux:',AARRAY(:,128,2,1)
+
+      PRINT *,'HARMONIC:',HARMONIC
+
+      SELECT CASE (ITS_A_LEAPYEAR (GET_YEAR()))
+       CASE (.TRUE.)
+          DAY_DIVISOR = REAL(GET_DAY_OF_YEAR()) / 366.
+       CASE (.FALSE.)
+          DAY_DIVISOR = REAL(GET_DAY_OF_YEAR()) / 365.
+      END SELECT
+
+      IF (FLUX_TYPE == 0) THEN
+              AARRAY(:,:,:,:) = 0.
+        IF (REAL(HARMONIC) > 0.1 .and. REAL(HARMONIC) < 3.9) THEN
+             RARRAY(:,:,:,:) = RARRAY(:,:,:,:) * 
+     &              SIN(2*PI*REAL(HARMONIC) * DAY_DIVISOR)
+        PRINT*,'APPLYING HARMONIC:',SIN(2*PI*REAL(HARMONIC)*DAY_DIVISOR)
+        ENDIF
+
+        IF (REAL(HARMONIC) > 3.9 .and. REAL(HARMONIC) < 8) THEN
+             RARRAY(:,:,:,:) = RARRAY(:,:,:,:) *
+     &              COS(2*PI*REAL(HARMONIC-3) * DAY_DIVISOR)
+        PRINT*,'APPLYING HARMONIC:',
+     &        COS(2*PI*REAL(HARMONIC-3)*DAY_DIVISOR)
+        ENDIF
+
+      ENDIF
+
+      IF (FLUX_TYPE == 1) THEN
+              RARRAY(:,:,:,:) = 0.
+        IF (REAL(HARMONIC) > 0.1 .and. REAL(HARMONIC) < 3.9) THEN
+             AARRAY(:,:,:,:) = AARRAY(:,:,:,:) *
+     &              SIN(2*PI*REAL(HARMONIC) * DAY_DIVISOR)
+        PRINT*,'APPLYING HARMONIC:',SIN(2*PI*REAL(HARMONIC)*DAY_DIVISOR)
+        ENDIF
+
+        IF (REAL(HARMONIC) > 3.9 .and. REAL(HARMONIC) < 8) THEN
+             AARRAY(:,:,:,:) = AARRAY(:,:,:,:) *
+     &              COS(2*PI*REAL(HARMONIC-3) * DAY_DIVISOR)
+        PRINT*,'APPLYING HARMONIC:',
+     &       COS(2*PI*REAL(HARMONIC-3)*DAY_DIVISOR)
+        ENDIF
+
+      ENDIF
+
+      DO J = 1, 180
+        DO I = 1, 360
+            NEEARRAY(I,J) = SUM(RARRAY(I,J,:,:)) + SUM(AARRAY(I,J,:,:))
+        ENDDO
+      ENDDO
+
+      PRINT *,'FLUX AMZ:', NEEARRAY(100:110,85:95)
+
+      PRINT *,'test flux:',NEEARRAY(:,128)
+      PRINT *,'test flux2:',NEEARRAY(:,100)
+
+      !-- Convert umolC m^-2 s^-1 to molecules C cm^-2 s^-1
+      !-- Then convert molC to molecules C via Avos #
+      NEEARRAY = NEEARRAY * 6.022142e+13
+
+      ! File with lat/lon edges for regridding
+      LLFILENAME = TRIM( DATA_DIR_1x1) //
+     &             'MAP_A2A_Regrid_201203/MAP_A2A_latlon_generic1x1.nc'
+
+      GEN_1x1(:,:,1) = NEEARRAY(:,:)
+
+      ! Regrid from GENERIC 1x1 --> current model resolution
+      INGRID  => GEN_1x1  (:,:,1)
+      OUTGRID => GEOS_GRID(:,:,1)
+
+      CALL DO_REGRID_A2A( LLFILENAME, I1x1,    J1x1-1,
+     &                    INGRID,     OUTGRID, IS_MASS=0,
+     &                    netCDF=.TRUE.                   )
+
+      !-- At this point NEEARRAY is POSITIVE and either Resp or GPP
+   
+
+      PRINT *,'REGRID FLUX:',OUTGRID(32,:)
+      PRINT *,'REGRID FLUX2:',OUTGRID(25,:)
+
+      !IF ( LBIAS ) THEN
+      !
+      ! IF ( LENKF ) THEN
+      !   IF ( .NOT. RERUN ) THEN
+      !        CYCLE_NUM = CYCLE_NUM - 1
+      !        write(CCYCLE_NUM, '(i3.3)') CYCLE_NUM
+      !        CYCLE_NUM = CYCLE_NUM + 1
+      !   ELSE
+      !        write(CCYCLE_NUM, '(i3.3)') CYCLE_NUM
+      !   ENDIF
+      !
+      !  IF ( LLAG ) THEN
+      !    XREAL = GET_ELAPSED_MIN()/(1440*CYCLE_LEN)
+      !    print *,'MINS:',GET_ELAPSED_MIN()
+      !    XDAY =  XREAL
+      !    print *,'XDAY:',XDAY
+      !    LAG_NUM_NEW = LAG_NUM + XDAY
+
+      !    write(CLAG_NUM, '(i3.3)') LAG_NUM_NEW
+
+      !    IF ( RERUN ) THEN
+      !    !CURRENT_BIASFILE = TRIM(BIASFILEIN)//'post_'//CLAG_NUM//'_'//
+      !    !&         CCYCLE_NUM //'.nc'
+      !    ELSE
+      !    !CURRENT_BIASFILE = TRIM(BIASFILEIN)//'prior_'//CLAG_NUM//'_'//
+      !    !&         CCYCLE_NUM//'.nc'
+      !    ENDIF
+
+      !   ELSE
+      !    IF ( RERUN ) THEN
+      !    CURRENT_BIASFILE = TRIM(BIASFILEIN)//'post_'//
+      !&         CCYCLE_NUM //'.nc'
+      !    ELSE
+      !    CURRENT_BIASFILE = TRIM(BIASFILEIN)//'prior_'//
+      !&         CCYCLE_NUM//'.nc'
+      !    ENDIF
+      !
+      !   ENDIF
+    
+
+      !   PRINT *,'USING BIASFILE:',CURRENT_BIASFILE
+      !   !CALL STRREPL( FILE, 'ENSNUMB', TRIM(CENUMBER) )
+      ! ENDIF
+
+      !    print *,'reading biases from ...',trim(BIASFILE)
+
+      !    CALL readensVar2D(TRIM(CURRENT_BIASFILE),'BETAGPP',IIPAR,
+      !&                   JJPAR, ENUMBER, 1, GPPBIAS(:,:,1))
+
+      !    CALL readensVar2D(TRIM(CURRENT_BIASFILE),'BETARESP',IIPAR,
+      !&                   JJPAR, ENUMBER, 1, RESPBIAS(:,:,1))
+
+           !*****RARRAY = RARRAY + ( RESPBIAS * RARRAY )
+           !*****AARRAY = AARRAY + ( GPPBIAS * AARRAY )
+      ! ENDIF
+
+      !-- Calc NEE to feed in as emissions
+      !NEEARRAY = RARRAY - AARRAY
+
+      !print *,'ADJ:',sum(RESPBIAS*RARRAY)/(max(1,size(RESPBIAS)))
+
+      ! Cast from REAL*4 to REAL*8 and resize if necessary
+      EMBIOCO2 = OUTGRID(:,:)
+      ! Cast from REAL*4 to REAL*8 and resize if necessary
+      !CALL TRANSFER_2D( OUTGRID, EMBIOCO2 )
+
+      ! Free pointers
+      NULLIFY( INGRID, OUTGRID )
+
+      END SUBROUTINE READ_BBIO_SIB_HARMONIC
+!EOC
 !------------------------------------------------------------------------------
 !                        Colorado State University and                        !
 !                        University of Toronto and                            !

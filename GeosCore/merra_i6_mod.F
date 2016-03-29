@@ -76,6 +76,7 @@
 !
 ! !INPUT PARAMETERS: 
 !
+      INTEGER                    :: NYMD2
       INTEGER,        INTENT(IN) :: NYMD        ! YYYYMMDD date
       INTEGER,        INTENT(IN) :: NHMS        ! hhmmss time
       TYPE(OptInput), INTENT(IN) :: Input_Opt   ! Input Options object
@@ -104,6 +105,19 @@
       ! OPEN_MERRA_I6_FIELDS begins here!
       !=================================================================
 
+      PRINT *,'OPENMERRAI6 called with:',NYMD,' ',NHMS
+
+      ! Hack for a missing file 
+      IF ( NYMD == 20151003 ) THEN 
+          PRINT *,'changing again'
+          NYMD2 = 20151002
+      ElSEIF ( NYMD == 20141225 ) THEN
+          PRINT *,'changing again'
+          NYMD2 = 20141226
+      ELSE
+          NYMD2 = NYMD
+      ENDIF
+
       ! Check if it's time to open file
       IF ( NHMS == 000000 .or. FIRST ) THEN
 
@@ -116,8 +130,8 @@
          I6_FILE  = 'YYYYMMDD.i6.' // GET_RES_EXT()
 
          ! Replace date tokens
-         CALL EXPAND_DATE( GEOS_DIR, NYMD, NHMS )
-         CALL EXPAND_DATE( I6_FILE,  NYMD, NHMS )
+         CALL EXPAND_DATE( GEOS_DIR, NYMD2, NHMS )
+         CALL EXPAND_DATE( I6_FILE,  NYMD2, NHMS )
 
          ! Full file path
          PATH = TRIM( Input_Opt%DATA_DIR ) // 
@@ -198,6 +212,7 @@
 ! !INPUT PARAMETERS: 
 !
       INTEGER,        INTENT(IN)    :: NYMD   ! YYYYMMDD date 
+      INTEGER                       :: NYMD2   ! YYYYMMDD date
       INTEGER,        INTENT(IN)    :: NHMS   ! hhmmss time of desired data
 !
 ! !INPUT/OUTPUT PARAMETERS:
@@ -215,7 +230,19 @@
       !=================================================================      
       ! Read data from disk
       !=================================================================
-      CALL READ_I6( NYMD = NYMD, 
+
+      ! Hack for a missing file
+      IF ( NYMD == 20151003 ) THEN
+          PRINT *,'changing again'
+          NYMD2 = 20151002
+      ElSEIF ( NYMD == 20141225 ) THEN
+          PRINT *,'changing again'
+          NYMD2 = 20141226
+      ELSE
+          NYMD2 = NYMD
+      ENDIF
+
+      CALL READ_I6( NYMD = NYMD2, 
      &              NHMS = NHMS, 
      &              PS   = State_Met%PS1, 
      &              RH   = State_Met%RH1   )
@@ -243,6 +270,7 @@
 !
 ! !INPUT PARAMETERS: 
 !
+      INTEGER                       :: NYMD2
       INTEGER,        INTENT(IN)    :: NYMD   ! YYYYMMDD date 
       INTEGER,        INTENT(IN)    :: NHMS   ! hhmmss time of desired data
 !
@@ -257,10 +285,21 @@
 !EOP
 !------------------------------------------------------------------------------
 !BOC
+      ! Hack for a missing file
+      IF ( NYMD == 20151003 ) THEN
+          PRINT *,'changing again'
+          NYMD2 = 20151002
+      ElSEIF ( NYMD == 20141225 ) THEN
+          PRINT *,'changing again'
+          NYMD2 = 20141226
+      ELSE
+          NYMD2 = NYMD
+      ENDIF
+
       !=================================================================      
       ! Read data from disk
       !=================================================================
-      CALL READ_I6( NYMD = NYMD, 
+      CALL READ_I6( NYMD = NYMD2, 
      &              NHMS = NHMS,
      &              PS   = State_Met%PS2, 
      &              RH   = State_Met%RH2  )

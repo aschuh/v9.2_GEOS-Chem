@@ -1305,10 +1305,11 @@
                ! If it's a full-chemistry simulation but LCHEM=F,
                ! or if it's an offline simulation, call setup routine
                IF ( ITS_A_FULLCHEM_SIM ) THEN
-                  IF ( .not. LCHEM ) CALL SETUP_GOSAT( am_I_Root )
+                  IF ( .not. LCHEM ) CALL SETUP_GOSAT( am_I_Root , 
+     &                Input_Opt,RC)
                ELSE
                   PRINT *,'calling SETUP_GOSAT'
-                  CALL SETUP_GOSAT( am_I_Root )
+                  CALL SETUP_GOSAT( am_I_Root , Input_Opt,RC)
                ENDIF
             ENDIF
          ENDIF
