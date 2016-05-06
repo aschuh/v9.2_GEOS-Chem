@@ -353,6 +353,7 @@
          ELSE IF ( INDEX( LINE, 'CO2 SIM MENU'     ) > 0 ) THEN
             CALL READ_CO2_SIM_MENU( am_I_Root, Input_Opt, RC )
             SEEN_CO2_MENU = .TRUE.                                    
+
          ELSE IF ( INDEX( LINE, 'ENKF MENU'        ) > 0 ) THEN !A. Schuh
             IF (SEEN_SIMULATION_MENU) THEN
                CALL ERROR_STOP("the ENKF MENU in input.geos must " //
@@ -388,6 +389,9 @@
                                                   
          ELSE IF ( INDEX( LINE, 'CT MENU' ) > 0 ) THEN
             CALL READ_CT_MENU
+
+         ELSE IF ( INDEX( LINE, 'OBSPACK MENU' ) > 0 ) THEN
+            CALL READ_OBSPACK_MENU( am_I_Root, Input_Opt, RC )
 
          ELSE IF ( INDEX( LINE, 'ND48 MENU'        ) > 0 ) THEN
             CALL READ_ND48_MENU( am_I_Root, Input_Opt, RC )                  
@@ -5492,6 +5496,67 @@
       END SUBROUTINE READ_DIAGNOSTIC_MENU
 !EOC
 !------------------------------------------------------------------------------
+!          NOAA-ESRL                                                          !
+!------------------------------------------------------------------------------
+!BOP
+!
+       !IROUTINE: read_obspack_menu
+       !DESCRIPTION: Subroutine READ\_OBSPACK\_MENU reads the OBSPACK MENU 
+       SUBROUTINE READ_OBSPACK_MENU( am_I_Root, Input_Opt, RC )
+
+      USE GIGC_ErrCode_Mod
+      USE GIGC_Input_Opt_Mod, ONLY : OptInput
+      USE ERROR_MOD,       ONLY : ERROR_STOP
+
+!
+! !INPUT PARAMETERS:
+!
+       LOGICAL,        INTENT(IN)    :: am_I_Root   ! Is this the root CPU?
+!
+! !INPUT/OUTPUT PARAMETERS:
+!
+       TYPE(OptInput), INTENT(INOUT) :: Input_Opt   ! Input options
+!
+! !OUTPUT PARAMETERS:
+!
+       INTEGER,        INTENT(OUT)   :: RC          ! Success or failure
+!
+       INTEGER            :: N
+       CHARACTER(LEN=255) :: SUBSTRS(MAXDIM), MSG
+       LOGICAL            :: DO_OBSPACK
+       CHARACTER(LEN=255) :: IFILE
+       CHARACTER(LEN=255) :: OFILE
+
+       ! READ_OBSPACK_MENU begins here!
+       !CALL ERROR_STOP( MSG, 'READ_OBSPACK_MENU ("input_mod.f")' )
+       DO_OBSPACK = .FALSE.
+       ! Turn on obspack diagnostic?
+       CALL SPLIT_ONE_LINE( SUBSTRS, N, 1,  'read_obspack_menu:1' )
+       READ( SUBSTRS(1:N), * ) DO_OBSPACK
+       Input_Opt%DO_OBSPACK    = DO_OBSPACK
+
+       ! Input file name (w/ obspack xyzt)
+       CALL SPLIT_ONE_LINE( SUBSTRS, N, 1,  'read_obspack_menu:2' )
+       READ( SUBSTRS(1:N), '(a)' ) IFILE
+       Input_Opt%OBSPACK_IFILE  = IFILE
+
+       CALL SPLIT_ONE_LINE( SUBSTRS, N, 1,  'read_obspack_menu:3' )
+       READ( SUBSTRS(1:N), '(a)' ) OFILE
+       Input_Opt%OBSPACK_OFILE = OFILE
+
+       WRITE( 6, '(/,a)' ) 'OBSPACK MENU'
+       WRITE( 6, 100 ) 'Turn on obspack diag?   : ', DO_OBSPACK
+       WRITE( 6, 110 ) 'input ObsPack file     : ', TRIM(IFILE)
+       WRITE( 6, 110 ) 'input ObsPack file     : ', TRIM(OFILE)
+
+      ! FORMAT statements
+ 100  FORMAT( A, L5    )
+ 110  FORMAT( A, A     )
+ 120  FORMAT( A, I5    )
+
+       END SUBROUTINE READ_OBSPACK_MENU
+!EOC
+!------------------------------------------------------------------------------
 !          Harvard University Atmospheric Chemistry Modeling Group            !
 !------------------------------------------------------------------------------
 !BOP
@@ -5961,7 +6026,7 @@
       LOGICAL            :: DO_CT
       INTEGER            :: N
       CHARACTER(LEN=255) :: IFILE
-      CHARACTER(LEN=255) :: OFILE, OFILE2
+      CHARACTER(LEN=255) :: OFILE, OFILE2,OFILE3
       CHARACTER(LEN=255) :: SUBSTRS(MAXDIM), MSG
       CHARACTER(LEN=4)  :: CENUMBER
 
@@ -6015,10 +6080,10 @@
       ! Input file name (w/ flight track data points)
       CALL SPLIT_ONE_LINE( SUBSTRS, N, 1,  'read_ct_menu:4' )
       READ( SUBSTRS(1:N), '(a)' ) OFILE2
-      print *,'here2'
 
+      CALL SPLIT_ONE_LINE( SUBSTRS, N, 1,  'read_ct_menu:5' )
+      READ( SUBSTRS(1:N), '(a)' ) OFILE3
 
-      !=================================================================
       ! Print to screen
       !=================================================================
       WRITE( 6, '(/,a)' ) 'CT MENU'
@@ -6026,6 +6091,8 @@
       WRITE( 6, 100     ) 'Turn on ct diag?   : ', DO_CT
       WRITE( 6, 110     ) 'Flight track input file     : ', TRIM(IFILE)
       WRITE( 6, 110     ) 'Output file name            : ', TRIM(OFILE)
+      WRITE( 6, 110     ) 'Output ocean flux file name : ', TRIM(OFILE2)
+      WRITE( 6, 110     ) 'Output bio flux file name   : ', TRIM(OFILE3)
 
       ! FORMAT statements
  100  FORMAT( A, L5    )
@@ -6036,7 +6103,7 @@
       !=================================================================
 
       ! Pass variables to "planeflight_mod.f"
-      CALL SET_CT( DO_CT, IFILE, OFILE , OFILE2)
+      CALL SET_CT( DO_CT, IFILE, OFILE , OFILE2, OFILE3)
 
       END SUBROUTINE READ_CT_MENU
 !EOC

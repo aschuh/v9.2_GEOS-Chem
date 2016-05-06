@@ -30,6 +30,7 @@
       PUBLIC  :: SET_CT
       PUBLIC  :: CT_FINISH_OUTPUT
       PUBLIC  :: SETUP_CT_OCFL_OUT
+      PUBLIC  :: SETUP_CT_BIOFL_OUT
 !
 ! !PRIVATE MEMBER FUNCTIONS:
 !
@@ -179,7 +180,9 @@
       CHARACTER(LEN=255)             :: INFILENAME,  INF1, INF2,INF3
       CHARACTER(LEN=255)             :: OUTFILENAME,OUTF1,OUTF2,OUTF3
       CHARACTER(LEN=255), PUBLIC     :: OCEANFILENAME
-      CHARACTER(LEN=255)             :: OUTF
+      CHARACTER(LEN=255), PUBLIC     :: BIOFILENAME
+      CHARACTER(LEN=255)             :: OUT_OCEAN_F
+      CHARACTER(LEN=255)             :: OUT_BIO_F
 
       ! Logical unit numbers (formerly in file_mod.F)
       INTEGER                        :: IU_FILE
@@ -676,12 +679,12 @@
       !DAYAHEAD = GET_TIME_AHEAD(1440 )
 
       ! Copy file names to local variables
-      OUTF = OCEANFILENAME
+      OUT_OCEAN_F = OCEANFILENAME
 
       ! Replace any date & time tokens in the file names
-      CALL EXPAND_DATE( OUTF,  NYMD, NHMS )
+      CALL EXPAND_DATE( OUT_OCEAN_F,  NYMD, NHMS )
 
-       PRINT *,'OCEAN OUTF:',OUTF
+       PRINT *,'OCEAN OUTF:',OUT_OCEAN_F
 
       !=========================================================================
       ! Create the netCDF file
@@ -689,7 +692,7 @@
 
       ! Echo info
       WRITE( 6, '(a)' ) '=== Begin netCDF file creation test ==='
-      CALL NcCr_Wr( fId, TRIM(OUTF) )
+      CALL NcCr_Wr( fId, TRIM(OUT_OCEAN_F) )
 
       ! Turn filling off
       !CALL NcSetFill( fId, NF_NOFILL, omode )
@@ -738,7 +741,10 @@
       ! Define obspack_id variable
       !vId  = vId + 1
       var1 = (/ idLon, idLat, idTime /)
-      CALL NcDef_Variable( fId, 'ocean_flux', NF90_DOUBLE, 3, var1, vId)
+      CALL NcDef_Variable( fId, 'prior_ocean_flux', NF90_DOUBLE, 
+     &     3, var1, vId)
+      CALL NcDef_Variable( fId, 'opt_ocean_flux', NF90_DOUBLE, 
+     &     3, var1, vId)
       !CALL NcDef_Var_Attributes( fId, vId, 'long_name', 'ObsPack ID' )
       !CALL NcDef_Var_Attributes( fId, vId, 'units',     'hPa'      )
 
@@ -757,6 +763,197 @@
       WRITE( 6, '(a)' ) '===End oceanflux netCDF file creation test ==='
 
       END SUBROUTINE SETUP_CT_OCFL_OUT
+!EOC
+!------------------------------------------------------------------------------
+!          Harvard University Atmospheric Chemistry Modeling Group            !
+!------------------------------------------------------------------------------
+!BOP
+!
+! !IROUTINE: setup_CT
+!
+! !DESCRIPTION: Subroutine SETUP\_CT reads information from the
+!  input file in order to initialize the CT diagnostic.  Also
+!  calls INIT\_CT to allocate and zero module arrays.
+!\\
+!\\
+! !INTERFACE:
+!
+      SUBROUTINE SETUP_CT_BIOFL_OUT ( )
+!
+! !USES:
+!
+      USE FILE_MOD,   ONLY : FILE_EXISTS
+      USE FILE_MOD,   ONLY : IOERROR
+      !USE FILE_MOD,   ONLY : IU_FILE
+      USE TIME_MOD,   ONLY : EXPAND_DATE
+      USE TIME_MOD,   ONLY : GET_NYMD
+      USE TIME_MOD,   ONLY : GET_NHMS
+      USE TIME_MOD,   ONLY : GET_TIME_AHEAD
+      USE TRACER_MOD, ONLY : ITS_A_FULLCHEM_SIM
+      USE CTFORMAT, ONLY :ncCTOutputCreate,ncCTOutputClose
+      USE CTFORMAT, ONLY : ctOutputNCID
+      !USE NCCOOARDSFORMAT, ONLY :readGOSATlength
+      !USE NCCOOARDSFORMAT, ONLY :READGOSAT_ID,READGOSAT_REAL8
+      USE GIGC_In_Carbontracker_Mod
+      USE CT_INPUT_READ_MOD
+      USE CMN_SIZE_MOD
+
+      ! References to F90 modules
+      USE netcdf
+      USE TRACER_MOD, ONLY : N_TRACERS
+      USE GIGC_In_Carbontracker_Mod
+      USE m_netcdf_io_open
+      USE m_netcdf_io_close
+      USE m_netcdf_io_read
+      USE m_netcdf_io_write
+      USE m_netcdf_io_get_dimlen
+      USE m_do_err_out
+      USE m_netcdf_io_create
+      USE m_netcdf_io_define
+!
+! !INPUT PARAMETERS:
+!
+      !LOGICAL, INTENT(IN) :: am_I_Root   ! Is this the root CPU?
+
+! !REMARKS:
+!  For SMVGEAR or KPP simulations, the call to SETUP_CT is made from
+!  routine "chemdr.f", after the "chem.dat" file is read.  This is necessary
+!  since we have to reference the SMVGEAR rxn rate and species numbers.
+!                                                                             .
+!  For offline simulations, the call to SETUP_CT can be made
+!  at the start of the GEOS-Chem run (in "ndxx_setup.f" or similar routine).
+!
+! !REVISION HISTORY:
+!  30 Jul 2002 - M. Evans    - Initial version
+!  (1 ) Rename from "plane.dat" to "plane.log", since "*.dat" implies an input
+!        file name. (bmy, 8/8/03)
+!  (2 ) Add fancy output string (bmy, 4/26/04)
+!  (3 ) Now references GET_NYMD, GET_NHMS, and EXPAND_DATE from "time_mod.f".
+!        Now also replaces date & time tokens in the filenames. (bmy, 7/20/04)
+!  (4 ) Now references FILE_EXISTS from "file_mod.f".  Modified so that we
+!        check if a flight track file exists on each day.  Open file for
+!        output on each day and write header. (bmy, 3/25/05)
+!  29 Jul 2011 - R. Yantosca - Added ProTeX headers
+!EOP
+!------------------------------------------------------------------------------
+!BOC
+!
+! !LOCAL VARIABLES:
+!
+      ! Local Variables
+      integer                               :: NCID, DIM_LEN
+      integer,  dimension(:), allocatable   :: SAMPLE_STRATEGY
+
+      ! For netCDF file I/O
+      INTEGER             :: idTime,    idLat,   idLon
+      INTEGER             :: fId
+      INTEGER             ::  vId,     omode,   i
+      INTEGER             :: var1(3)
+
+
+      LOGICAL, SAVE      :: FIRST = .TRUE.
+      LOGICAL            :: IS_OPEN
+      INTEGER            :: IP,      N,   TEMP, LENGTH
+      INTEGER            :: RN, COUNTER, IOS, NYMD, NHMS
+      INTEGER            :: DAYAHEAD(2), DAYBEHIND(2)
+      INTEGER            :: TEST
+
+      !=================================================================
+      ! SETUP_CT begins here!
+      !=================================================================
+
+      ! Get date & time
+      NYMD  = GET_NYMD()
+      NHMS  = GET_NHMS()
+
+      !DAYBEHIND = GET_TIME_AHEAD(-1440 )
+      !DAYAHEAD = GET_TIME_AHEAD(1440 )
+
+      ! Copy file names to local variables
+      OUT_BIO_F = BIOFILENAME
+
+      ! Replace any date & time tokens in the file names
+      CALL EXPAND_DATE( OUT_BIO_F,  NYMD, NHMS )
+
+       PRINT *,'BIO OUTF:',OUT_BIO_F
+
+      !=========================================================================
+      ! Create the netCDF file
+      !=========================================================================
+
+      ! Echo info
+      WRITE( 6, '(a)' ) '=== Begin netCDF file creation test ==='
+      CALL NcCr_Wr( fId, TRIM(OUT_BIO_F) )
+
+      ! Turn filling off
+      !CALL NcSetFill( fId, NF_NOFILL, omode )
+
+      !=========================================================================
+      ! Define the dimensions
+      !=========================================================================
+
+      ! Time dimension
+      WRITE( 6, '(a)' ) 'Writing obs  (dim     ) to netCDF file'
+      CALL NcDef_Dimension( fId, 'time',   8,  idTime )
+      !CALL NcDef_Unlim_Dimension( fId, 'obs',idObs)
+
+      ! Latitude dimension
+      CALL NcDef_Dimension( fId, 'lat',  180 , idLat )
+
+      ! Longitude dimension
+      CALL NcDef_Dimension( fId, 'lon', 360,  idLon )
+
+      !=========================================================================
+      ! Define the variables and variable attributes
+      ! for COARDS compliance and GAMAP compliance
+      !=========================================================================
+      CALL NcDef_Glob_Attributes( fId, 'Title',       'NcdfUtilities' )
+      CALL NcDef_Glob_Attributes( fId, 'History',     '24 Jan 2011'   )
+      CALL NcDef_Glob_Attributes( fId, 'Conventions', 'COARDS'        )
+      CALL NcDef_Glob_Attributes( fId, 'Model',       'GEOS4'         )
+      CALL NcDef_Glob_Attributes( fId, 'Nlayers',     '55'            )
+      CALL NcDef_Glob_Attributes( fId, 'Start_Date',  '20110101'      )
+      CALL NcDef_Glob_Attributes( fId, 'Start_Time',  '00:00:00.0'    )
+      CALL NcDef_Glob_Attributes( fId, 'End_Date',    '20110101'      )
+      CALL NcDef_Glob_Attributes( fId, 'End_Time',    '23:59:59.0'    )
+      CALL NcDef_Glob_Attributes( fId, 'Delta_Lon',   '5'             )
+      CALL NcDef_Glob_Attributes( fId, 'Delta_Lat',   '4'             )
+      CALL NcDef_Glob_Attributes( fId, 'Delta_time',  '000000'        )
+      CALL NcDef_Glob_Attributes( fId, 'Format',      'netCDF-3'      )
+      CALL NcDef_Glob_Attributes( fId,'valid_range',(/-1e15,+1e15 /)  )
+
+      !=========================================================================
+      ! Define the variables and variable attributes
+      !=========================================================================
+
+      ! Time index array (hardwire date to 2011/01/01)
+      vId     = -1
+
+      ! Define obspack_id variable
+      !vId  = vId + 1
+      var1 = (/ idLon, idLat, idTime /)
+      CALL NcDef_Variable( fId, 'prior_bio_flux', NF90_DOUBLE, 3, 
+     &   var1, vId)
+      CALL NcDef_Variable( fId, 'opt_bio_flux', NF90_DOUBLE, 3, 
+     &   var1, vId)
+      !CALL NcDef_Var_Attributes( fId, vId, 'long_name', 'ObsPack ID' )
+      !CALL NcDef_Var_Attributes( fId, vId, 'units',     'hPa'      )
+
+      !=========================================================================
+      ! %%% END OF DEFINITION SECTION %%%
+      ! %%% NOW WRITE DATA TO FILE    %%%
+      !=========================================================================
+      CALL NcEnd_def( fId )
+
+      !=========================================================================
+      ! Close the netCDF file
+      !=========================================================================
+      CALL NcCl( fId )
+
+      ! Echo info
+      WRITE( 6, '(a)' ) '===End bioflux netCDF file creation test ==='
+
+      END SUBROUTINE SETUP_CT_BIOFL_OUT
 !EOC
 !------------------------------------------------------------------------------
 !          Harvard University Atmospheric Chemistry Modeling Group            !
@@ -2284,7 +2481,10 @@
               END DO
                !PRINT *,'obs height:',P_ALTITUDE(M)
                !PRINT *,'setting L to:',TOP
-               L = TOP
+
+               !-- I'M ADDING 1 to THIS, NEED TO CHECK AGAINST ANDY'S GEOPOT CODE
+               !L = TOP
+               L = TOP + 1
                
                   !--  Averaging in Met variables
            !PRINT *,'N_TRACERS:',N_TRACERS         
@@ -2758,7 +2958,7 @@
 !\\
 ! !INTERFACE:
 !
-      SUBROUTINE SET_CT( CT, IN_FILE, OUT_FILE, OCEAN_FILE )
+      SUBROUTINE SET_CT( CT, IN_FILE, OUT_FILE, OCEAN_FILE, BIO_FILE )
 !
 ! !INPUT PARAMETERS: 
 !
@@ -2766,6 +2966,7 @@
       CHARACTER(LEN=255), INTENT(IN) :: IN_FILE    ! Input file to read
       CHARACTER(LEN=255), INTENT(IN) :: OUT_FILE   ! Output file to write
       CHARACTER(LEN=255), INTENT(IN) :: OCEAN_FILE   ! Another output file to write
+      CHARACTER(LEN=255), INTENT(IN) :: BIO_FILE   ! Another output file to write
 ! 
 ! !REVISION HISTORY: 
 !  20 Jul 2004 - R. Yantosca - Initial version
@@ -2779,6 +2980,7 @@
       INFILENAME  = TRIM( IN_FILE  )
       OUTFILENAME = TRIM( OUT_FILE )
       OCEANFILENAME = TRIM(OCEAN_FILE)
+      BIOFILENAME = TRIM(BIO_FILE)
 
       END SUBROUTINE SET_CT
 !EOC
@@ -3097,13 +3299,18 @@
          !Z2(N) = Rd*(T(I,J,NLVL-N+1)*(1+Qmf*Q(I,J,NLVL-N+1)))*1/g*
               Z(N) = PHIS(I,J)/g +Rd*(T(I,J,NLVL-N+1))*1/g*
      &              LOG(pedge2(N+1)/pedge2(N))
-       !PRINT *,'partZ2:',Z(N)
+       PRINT *,'I:',I,'J:',J
+       PRINT *,'Z(N):',Z(N)
+       PRINT *,'T(I,J,NLVL-N+1):',T(I,J,NLVL-N+1)
+       PRINT *,'PHIS(I,J):',PHIS(I,J)
+       PRINT *,'LOG(pedge2(N+1)/pedge2(N)):',LOG(pedge2(N+1)/pedge2(N))
       ENDDO
-
+ 
       Z2 = 0
 
       DO N=1, NLVL
         Z2(N) = SUM(Z(NLVL-N+1:NLVL)) 
+        PRINT *,'N:',N,'PARTIAL SUM Z2(N):',Z2(N)
       ENDDO
       !PRINT *,'Z2:',Z2
 

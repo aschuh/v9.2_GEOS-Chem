@@ -2009,7 +2009,18 @@
       USE GIGC_ErrCode_Mod
       USE GIGC_Input_Opt_Mod, ONLY : OptInput
       USE TIME_MOD,           ONLY : GET_YEAR, ITS_A_LEAPYEAR
+      USE TIME_MOD,           ONLY : GET_DAY_OF_YEAR
       USE TRANSFER_MOD,       ONLY : TRANSFER_2D
+      USE REGRID_A2A_MOD,     ONLY : DO_REGRID_A2A
+
+      USE DIRECTORY_MOD,    ONLY : SIB_DIR, DATA_DIR_1x1
+      USE ENKF_MOD,        ONLY : PFT,FLUX_TYPE,HARMONIC,TRANSCOM_REGION
+
+      USE m_netcdf_io_close
+      USE m_netcdf_io_open
+      USE m_netcdf_io_read
+      USE m_do_err_out
+      USE m_netcdf_io_checks
 !
 ! !INPUT PARAMETERS:
 !
@@ -2042,10 +2053,23 @@
       INTEGER                :: STATUS
       REAL*4                 :: OARRAY(IIPAR,JJPAR,1)
       REAL*4                 :: OCEANBIAS(IIPAR,JJPAR,1)
+      REAL                   :: TRANSCOM_REGS(360,180)
+      REAL*4                 :: DAY_DIVISOR
+      INTEGER                :: NCID, I, J
       CHARACTER(LEN=255)     :: OCEAN_FILENAME
       CHARACTER(LEN=255)     :: OCEAN_BIAS_FILENAME
       CHARACTER(LEN=4)       :: CYEAR
       CHARACTER(LEN=2)       :: CMONTH
+      CHARACTER(LEN=255)     :: TRANSCOM_FILENAME
+      CHARACTER(LEN=255)     :: LLFILENAME
+
+      REAL*8, TARGET     :: GEOS_GRID(IIPAR,JJPAR,1)
+      REAL*8, TARGET      :: GEN_1x1(360,180,1)
+
+      REAL*8, POINTER    :: INGRID(:,:)  => NULL()
+      REAL*8, POINTER    :: OUTGRID(:,:) => NULL()
+      REAL*4             :: FLX_ARRAY(360,180,1)
+      REAL, PARAMETER :: PI = 3.1415927
 
       ! For fields from Input_Opt
       LOGICAL                :: LOCN1997, LOCN2009ANN, LOCN2009MON
@@ -2063,7 +2087,9 @@
        WRITE( CYEAR, '(i4)' ) YEAR
        WRITE( CMONTH, '(i2.2)' ) MONTH
 
-      OCEAN_FILENAME = TRIM( OCEAN_DIR ) // 'doneyOceanFlux' //
+
+
+      OCEAN_FILENAME = TRIM( OCEAN_DIR ) //
      &                  CYEAR // '.nc'
 
       ! Echo file name to stdout
@@ -2074,16 +2100,89 @@
       ! Read ocean flux [molec CO/cm2/s] from disk
       !-----------------------------------------------------------------
       CALL readVar2D(TRIM(OCEAN_FILENAME),'FG_CO2',IIPAR,
-     &                  JJPAR, MONTH, OARRAY(:,:,1))
+     &                  JJPAR, MONTH, FLX_ARRAY(:,:,1))
 
-      WHERE (OARRAY > 10.0) OARRAY = 0.0
+      WHERE (FLX_ARRAY > 10.0) FLX_ARRAY = 0.0
 
+      !--------------------------------------------------
+      !-- This is one off for harmonic work, units for these
+      !-  Doney fluxes (gx3.01.anthro.ncepcdc.monthly.1x1d.*.nc)
+      !-- are molC instead of umolC like we had previously, hence
+      !-- the 10^6 scalar
+      !-- If we want to subset, for OCO2 harmonic work
+      IF(TRANSCOM_REGION .ne. -1) THEN
+
+       TRANSCOM_FILENAME = TRIM( SIB_DIR ) // 'regions.nc'
+     
+       CALL Ncop_Rd( NCID, TRANSCOM_FILENAME )
+
+       ! Echo file name to stdout
+       WRITE( 6, 200 ) TRIM( TRIM( SIB_DIR ) // 'regions.nc' )
+ 200   FORMAT( '     - READ_TRANSCOM Reading ', a )
+
+       CALL Ncrd(TRANSCOM_REGS(:,:), ncid,'ocean_regions',
+     &       (/ 1,1 /), (/ 360,180 /))
+
+       CALL Nccl( NCID )
+       PRINT *,'Done w/ transcom read'
+
+      FLX_ARRAY = 1e6 * FLX_ARRAY      
+
+      DO J = 1, 180
+       DO I = 1, 360
+         IF(NINT(TRANSCOM_REGS(I,J)) .ne. TRANSCOM_REGION) 
+     &        FLX_ARRAY(I,J,1) = 0.
+       ENDDO
+      ENDDO
+
+      GEN_1x1(:,:,1) = FLX_ARRAY(:,:,1)
+
+      ! Regrid from GENERIC 1x1 --> current model resolution
+      INGRID  => GEN_1x1  (:,:,1)
+      OUTGRID => GEOS_GRID(:,:,1)
+
+      ! File with lat/lon edges for regridding
+      LLFILENAME = TRIM( DATA_DIR_1x1) //
+     &             'MAP_A2A_Regrid_201203/MAP_A2A_latlon_geos1x1.nc'
+
+      CALL DO_REGRID_A2A( LLFILENAME, I1x1,    J1x1-1,
+     &                    INGRID,     OUTGRID, IS_MASS=0,
+     &                    netCDF=.TRUE.                   )
+
+      !-- Applies HARMONIC
+
+      SELECT CASE (ITS_A_LEAPYEAR (GET_YEAR()))
+       CASE (.TRUE.)
+          DAY_DIVISOR = REAL(GET_DAY_OF_YEAR()) / 366.
+       CASE (.FALSE.)
+          DAY_DIVISOR = REAL(GET_DAY_OF_YEAR()) / 365.
+      END SELECT
+
+        IF (REAL(HARMONIC) > 0.1 .and. REAL(HARMONIC) < 1.9) THEN
+             OUTGRID(:,:) = OUTGRID(:,:) *
+     &              SIN(2*PI*REAL(HARMONIC) * DAY_DIVISOR)
+        PRINT*,'APPLYING HARMONIC:',SIN(2*PI*REAL(HARMONIC)*DAY_DIVISOR)
+        ENDIF
+
+        IF (REAL(HARMONIC) > 1.9 .and. REAL(HARMONIC) < 2.9) THEN
+             OUTGRID(:,:) = OUTGRID(:,:) *
+     &              COS(2*PI*REAL(HARMONIC-1) * DAY_DIVISOR)
+        PRINT*,'APPLYING HARMONIC:',
+     &        COS(2*PI*REAL(HARMONIC-1)*DAY_DIVISOR)
+        ENDIF
+
+      OARRAY(:,:,1) = OUTGRID
+
+      ENDIF
+      
       !-- Convert mmolC/ m^-3 cm/ s^-1 to molecules C cm^-2 s^-1
       !-- Then convert molC to molecules C via Avos #
       !-- Change sign since Doney assumes flux into ocean is positive
       !OARRAY = ( -10.**-9. * 6.0221415*10.**23. )
       !&             * OARRAY
-      OARRAY = -6.022142*10.**14. * OARRAY
+      !OARRAY = -6.022142*10.**14. * OARRAY
+      OARRAY = -6.022142 * 1e13 * OARRAY
+
 
       print *,'OCEAN const:',-6.022142*10.**14.
       !print *,'max ocean flux:',maxval(oarray)
@@ -3365,6 +3464,7 @@
       USE GIGC_State_Chm_Mod, ONLY : ChmState
       USE GIGC_State_Met_Mod, ONLY : MetState
       USE CT_MOD,             ONLY : OCEANFILENAME,SETUP_CT_OCFL_OUT
+      USE CT_MOD,             ONLY : BIOFILENAME,SETUP_CT_BIOFL_OUT
       USE m_netcdf_io_open
       USE m_netcdf_io_close
       USE m_netcdf_io_write
@@ -3399,7 +3499,8 @@
 !      REAL*4                 :: FLX_ARRAY(IIPAR,JJPAR,1)
       REAL*4                 :: FLX_ARRAY(360,180,1)
       REAL*4                 :: XREAL
-      CHARACTER(LEN=255)     :: FLUX_FILENAME,FLUX_FILENAME_OPT, OCEANF
+      CHARACTER(LEN=255)     :: FLUX_FILENAME,FLUX_FILENAME_OPT
+      CHARACTER(LEN=255)     :: BIOF, OCEANF
       CHARACTER(LEN=255)     :: CURRENT_BIASFILE
       CHARACTER(LEN=4)       :: CYEAR, YYYY_STR
       CHARACTER(LEN=2)       :: CMONTH, MM_STR,DD_STR
@@ -3505,9 +3606,9 @@
       !&                'NEE.2x2.5.'       //
      &                CYEAR // CMONTH // '.nc'
 
-      FLUX_FILENAME_OPT = '/discover/nobackup/aschuh/data/ct2013b'//
-     &  '_opt_orig/1x1_TM5met_CT_b2ocfmf/component_fluxes/CT2013B.'
-     &  //'flux1x1.'//CYEAR // CMONTH // '.nc'
+      !FLUX_FILENAME_OPT = '/discover/nobackup/aschuh/data/ct2013b'//
+      !&  '_opt_orig/1x1_TM5met_CT_b2ocfmf/component_fluxes/CT2013B.'
+      !&  //'flux1x1.'//CYEAR // CMONTH // '.nc'
 
       ! Echo file name to stdout
       WRITE( 6, 100 ) TRIM( FLUX_FILENAME )
@@ -3530,11 +3631,11 @@
 
       IF ( ( MONTH .EQ. 2 ) .AND. ( DAY .EQ. 29 ) ) THEN
 !          CALL readVar2D(TRIM(FLUX_FILENAME),'bio_flux_opt',
-          CALL readVar2D(TRIM(FLUX_FILENAME),'NEE',
+          CALL readVar2D(TRIM(FLUX_FILENAME),'b4',
      &      360,180, (DAY-2)*8+HOUR/3+1,FLX_ARRAY(:,:,1))
       ELSE
 !          CALL readVar2D(TRIM(FLUX_FILENAME),'bio_flux_opt',
-          CALL readVar2D(TRIM(FLUX_FILENAME),'NEE',
+          CALL readVar2D(TRIM(FLUX_FILENAME),'b4',
      &      360,180, (DAY-1)*8+HOUR/3+1,FLX_ARRAY(:,:,1))
       ENDIF
       PRINT *,'FLX_ARRAY(295,125,1):',FLX_ARRAY(295,125,1)      
@@ -3598,6 +3699,26 @@
       print *,'sum bio flux:',SUM(GEOS_GRID)
       !print *,'bio fluxes:',GEOS_GRID
 
+      !--  Writing out bio fluxes
+      IF(ENUMBER .eq. 1) THEN
+
+         BIOF = TRIM(BIOFILENAME)
+         NYMD  = GET_NYMD()
+         NHMS  = GET_NHMS()
+         CALL EXPAND_DATE( BIOF,  NYMD, NHMS )
+
+         IF (.not. FILE_EXISTS ( BIOF ) ) THEN
+            CALL SETUP_CT_BIOFL_OUT( )
+         END IF
+
+         CALL NcOp_Wr(NCID,BIOF)
+         CALL Ncwr(GEN_1x1 (:,:,1)/SCALING_FACTOR(:,:,1), NCID,
+     &   'prior_bio_flux',(/ 1,1, (HOUR/3+1) /), (/ 360,180,1 /) )
+         CALL Ncwr(GEN_1x1 (:,:,1), NCID,
+     &   'opt_bio_flux',(/ 1,1, (HOUR/3+1) /), (/ 360,180,1 /) )
+         CALL NcCl(NCID)
+
+      ENDIF
 
       EMBIOCO2 = GEOS_GRID(:,:,1) * 6.022142e+19_8
 
@@ -3622,10 +3743,10 @@
       !---------------------------
 
       IF ( ( MONTH .EQ. 2 ) .AND. ( DAY .EQ. 29 ) ) THEN
-          CALL readVar2D(TRIM(FLUX_FILENAME_OPT),'fossil_flux_imp',
+          CALL readVar2D(TRIM(FLUX_FILENAME),'fm',
      &      360,180, (DAY-2)*8+HOUR/3+1,FLX_ARRAY(:,:,1))
       ELSE
-          CALL readVar2D(TRIM(FLUX_FILENAME_OPT),'fossil_flux_imp',
+          CALL readVar2D(TRIM(FLUX_FILENAME),'fm',
      &      360,180, (DAY-1)*8+HOUR/3+1,FLX_ARRAY(:,:,1))
       ENDIF
 
@@ -3682,10 +3803,10 @@
       !---------------------------
 
       IF ( ( MONTH .EQ. 2 ) .AND. ( DAY .EQ. 29 ) ) THEN
-          CALL readVar2D(TRIM(FLUX_FILENAME_OPT),'fire_flux_imp',
+          CALL readVar2D(TRIM(FLUX_FILENAME),'w4',
      &      360,180, (DAY-2)*8+HOUR/3+1,FLX_ARRAY(:,:,1))
       ELSE
-          CALL readVar2D(TRIM(FLUX_FILENAME_OPT),'fire_flux_imp',
+          CALL readVar2D(TRIM(FLUX_FILENAME),'w4',
      &      360,180, (DAY-1)*8+HOUR/3+1,FLX_ARRAY(:,:,1))
       ENDIF
 
@@ -3777,21 +3898,24 @@
       !print *,'max flux:',MAXVAL(GEOS_GRID)
       !print *,'min flux:',MINVAL(GEOS_GRID)
 
-      !--  Writing out ocean fluxes
+      !--  Writing out ocean and bio fluxes
       IF(ENUMBER .eq. 1) THEN
          OCEANF = TRIM(OCEANFILENAME)
          NYMD  = GET_NYMD()
          NHMS  = GET_NHMS()
          CALL EXPAND_DATE( OCEANF,  NYMD, NHMS )
  
-               IF (.not. FILE_EXISTS ( OCEANF ) ) THEN
+         IF (.not. FILE_EXISTS ( OCEANF ) ) THEN
             CALL SETUP_CT_OCFL_OUT( )
          END IF
       
          CALL NcOp_Wr(NCID,OCEANF)
          CALL Ncwr(GEN_1x1  (:,:,1)/SCALING_FACTOR(:,:,1), NCID,
-     &   'ocean_flux',(/ 1,1, (HOUR/3+1) /), (/ 360,180,1 /) )
+     &   'prior_ocean_flux',(/ 1,1, (HOUR/3+1) /), (/ 360,180,1 /) )
+         CALL Ncwr(GEN_1x1  (:,:,1), NCID,
+     &   'opt_ocean_flux',(/ 1,1, (HOUR/3+1) /), (/ 360,180,1 /) )
          CALL NcCl(NCID)
+
       ENDIF
 
       !--  same as above but we're converting mol C instead of umol C

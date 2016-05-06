@@ -84,6 +84,7 @@
       USE ASCENDS_MOD,   ONLY : ASCENDS,SETUP_ASCENDS
       USE CT_MOD,        ONLY : CT,SETUP_CT,CT_FINISH_OUTPUT
       USE CT_MOD,        ONLY : SETUP_CT_OCFL_OUT
+      USE OBSPACK_MOD
       USE ENKF_MOD,          ONLY : ENUMBER,RERUN
       USE NCCOOARDSFORMAT, ONLY: ncStationFileClose
       USE CTFORMAT,      ONLY : ncCTOutputClose
@@ -844,6 +845,11 @@
      &           CALL DEBUG_MSG( '### MAIN: a READ_HG2_PARTITIONGING')
          ENDIF
 
+         IF ( Input_Opt%DO_OBSPACK .and. ( ITS_A_NEW_DAY() )) THEN
+               PRINT *,'ooobbbbbbsssspack'
+               CALL OBSPACK_INIT( am_I_Root, Input_Opt, RC)
+         ENDIF
+
          !==============================================================
          !              ***** D A I L Y   D A T A *****
          !==============================================================
@@ -1449,6 +1455,11 @@
      &            ( am_I_Root, Input_Opt, State_Met, State_Chm, RC )
             ENDIF
             IF ( prtDebug ) CALL DEBUG_MSG( '### MAIN: after DIAG40' )
+
+            IF (Input_Opt%DO_OBSPACK) THEN
+             CALL OBSPACK_SAMPLE(am_I_Root, Input_Opt, State_Met,
+     &            State_Chm, RC )
+            ENDIF
 
             !### Debug
             IF ( prtDebug ) CALL DEBUG_MSG( '### MAIN: a DIAGNOSTICS' )

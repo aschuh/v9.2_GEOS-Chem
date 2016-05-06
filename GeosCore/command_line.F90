@@ -36,6 +36,11 @@ SUBROUTINE PARSE_COMMAND_LINE
        CASE (5)
 
          PRINT *,'Running standard configuration with no lag....'
+        PRINT *, 'Setting harmonic=-1,pft=-1,transcom_region=-1,flux_type=-1'
+        PFT = NO_PFT
+        HARMONIC = NO_HARMONIC
+        FLUX_TYPE = NO_FLUX_TYPE
+        TRANSCOM_REGION = NO_TRANSCOM_REGION
 
          READ(ARG, *) ENUMBER
          IF (ENUMBER == 0) THEN
@@ -92,6 +97,11 @@ SUBROUTINE PARSE_COMMAND_LINE
       CASE (6)
 
         PRINT *,'Running standard configuration with lag....'
+        PRINT *, 'Setting harmonic=-1,pft=-1,transcom_region=-1,flux_type=-1'
+        PFT = NO_PFT
+        HARMONIC = NO_HARMONIC
+        FLUX_TYPE = NO_FLUX_TYPE
+        TRANSCOM_REGION = NO_TRANSCOM_REGION
 
         READ(ARG, *) ENUMBER
          IF (ENUMBER == 0) THEN
@@ -207,7 +217,8 @@ SUBROUTINE PARSE_COMMAND_LINE
          READ(ARG, *) TRANSCOM_REGION
          !IF (0 > DAYS .OR. DAYS > MAX_CYCLE_DAYS) THEN
          IF (0 > TRANSCOM_REGION .OR. TRANSCOM_REGION > 22) THEN
-             STOP "Bad transcom number"
+             !STOP "Bad transcom number"
+             PRINT *,'TRANSCOM > 22, must be running ocean fluxes....'
          END IF         
 
      END SELECT

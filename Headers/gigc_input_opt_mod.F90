@@ -350,6 +350,13 @@ MODULE GIGC_Input_Opt_Mod
      CHARACTER(LEN=255)          :: PF_OFILE
 
      !----------------------------------------
+     ! OBSPACK MENU fields
+     !----------------------------------------
+     LOGICAL                     :: DO_OBSPACK
+     CHARACTER(LEN=255)          :: OBSPACK_IFILE
+     CHARACTER(LEN=255)          :: OBSPACK_OFILE
+
+     !----------------------------------------
      ! ND48 MENU fields
      !----------------------------------------
      LOGICAL                     :: DO_ND48
@@ -1114,6 +1121,13 @@ CONTAINS
     Input_Opt%DO_PF                  = .FALSE.
     Input_Opt%PF_IFILE               = ''
     Input_Opt%PF_OFILE               = ''
+
+    !----------------------------------------
+    ! OBSPACK MENU fields
+    !----------------------------------------
+    Input_Opt%DO_OBSPACK             = .FALSE.
+    Input_Opt%OBSPACK_IFILE          = ''
+    Input_Opt%OBSPACK_OFILE          = ''
 
     !----------------------------------------
     ! ND48 MENU fields
