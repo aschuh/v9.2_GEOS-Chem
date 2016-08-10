@@ -5507,6 +5507,7 @@
       USE GIGC_ErrCode_Mod
       USE GIGC_Input_Opt_Mod, ONLY : OptInput
       USE ERROR_MOD,       ONLY : ERROR_STOP
+      USE ENKF_MOD,        ONLY : LLAG,LENKF, ENUMBER, RERUN
 
 !
 ! !INPUT PARAMETERS:
@@ -5526,6 +5527,7 @@
        LOGICAL            :: DO_OBSPACK
        CHARACTER(LEN=255) :: IFILE
        CHARACTER(LEN=255) :: OFILE
+       CHARACTER(LEN=4)   :: CENUMBER
 
        ! READ_OBSPACK_MENU begins here!
        !CALL ERROR_STOP( MSG, 'READ_OBSPACK_MENU ("input_mod.f")' )
@@ -5542,6 +5544,21 @@
 
        CALL SPLIT_ONE_LINE( SUBSTRS, N, 1,  'read_obspack_menu:3' )
        READ( SUBSTRS(1:N), '(a)' ) OFILE
+       !Input_Opt%OBSPACK_OFILE = OFILE
+
+      IF ( LENKF ) THEN
+        write(CENUMBER, '(i4.4)') ENUMBER
+
+        PRINT *,'TRIM(CENUMBER):',TRIM(CENUMBER)
+        PRINT *,'TRIM(OFILE):',TRIM(OFILE)
+        OFILE = TRIM(OFILE) // '.' // CENUMBER // '.nc'
+        !CALL STRREPL( FILE, 'ENSNUMB', TRIM(CENUMBER) )
+
+       IF ( RERUN .eq. 1 ) THEN
+           OFILE = TRIM(OFILE) // '.FINALRUN.nc'
+       ENDIF
+      ENDIF
+
        Input_Opt%OBSPACK_OFILE = OFILE
 
        WRITE( 6, '(/,a)' ) 'OBSPACK MENU'
@@ -5764,7 +5781,7 @@
 ! !USES:
 !
       USE ERROR_MOD,       ONLY : ERROR_STOP
-      USE GOSAT_MOD,       ONLY : SET_GOSAT
+      USE CO2SAT_MOD,       ONLY : SET_CO2SAT
       USE CMN_SIZE_MOD             ! MAXFAM
       USE CMN_DIAG_MOD             ! ND80
       USE ENKF_MOD,        ONLY : LLAG,LENKF, ENUMBER, RERUN
@@ -5836,11 +5853,13 @@
       READ( SUBSTRS(1:N), * ) VERTOPT
 
       !-- Temp fix for PFT
+      IF ( HARMONIC .ge. 0 ) THEN
        write (sffx, "(A1,I1.1,A1,I1.1,A1,I2.2,A1,I2.2)") '_',FLUX_TYPE,
      &        '_',HARMONIC,'_',PFT,'_',TRANSCOM_REGION
 
-      PRINT *,'This needs to be coded right....'
-      OFILE = TRIM(OFILE) // sffx // '.nc'
+       PRINT *,'This needs to be coded right....'
+       OFILE = TRIM(OFILE) // sffx // '.nc'
+      ENDIF
 
       IF ( LENKF ) THEN
         write(CENUMBER, '(i4.4)') ENUMBER
@@ -5876,7 +5895,7 @@
 
       PRINT *,'PREVAL VERTOPT:',VERTOPT
       ! Pass variables to "planeflight_mod.f"
-      CALL SET_GOSAT( DO_GOSAT, IFILE, OFILE, VERTOPT )
+      CALL SET_CO2SAT( DO_GOSAT, IFILE, OFILE, VERTOPT )
 
       END SUBROUTINE READ_GOSAT_MENU
 !EOC

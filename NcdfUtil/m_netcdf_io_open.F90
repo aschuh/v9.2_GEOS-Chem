@@ -73,6 +73,8 @@ CONTAINS
       character (len=128) :: err_msg
       integer             :: ierr
 !
+      PRINT *,'FILE2:',filname,'----'
+
       ierr = Nf_Open (filname, NF_NOWRITE, ncid)
 
       if (ierr /= NF_NOERR) then

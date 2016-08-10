@@ -267,6 +267,7 @@
       INTEGER            :: RN, COUNTER, IOS, NYMD, NHMS
       INTEGER            :: NCID
       INTEGER            :: DAYAHEAD(2), DAYBEHIND(2)
+      INTEGER            :: DAYBEHIND2(2)
       INTEGER            :: TEST
 
       CHARACTER(LEN=7)   :: NAMES
@@ -295,6 +296,7 @@
       !-- NEED TO FIND RIGHT NYMD/NHMS to put in find the "next day" INF/OUTF filenames
       ! Use Julian dates to automatically increase year/month
       DAYBEHIND = GET_TIME_AHEAD(-1440 )
+      DAYBEHIND2 = GET_TIME_AHEAD(-1440*2 )
       DAYAHEAD = GET_TIME_AHEAD(1440 )
       !CALL YMD_EXTRACT( YYYYMMDD1, YYYY1, MM1, DD1 )
       !JD  = JULDAY( YYYY, MM, DBLE(DD) )
@@ -326,9 +328,14 @@
       CALL EXPAND_DATE( INF1,  DAYBEHIND(1), DAYBEHIND(2) )
       CALL EXPAND_DATE( INF2,  NYMD, NHMS )
       CALL EXPAND_DATE( INF3,  DAYAHEAD(1), DAYAHEAD(2) )
+      !-- CODE used to write output for day n, w/ filename day n+1
       CALL EXPAND_DATE( OUTF2, NYMD, NHMS )
       CALL EXPAND_DATE( OUTF1, DAYBEHIND(1), DAYBEHIND(2) )
       CALL EXPAND_DATE( OUTF3, DAYAHEAD(1), DAYAHEAD(2) )
+
+      !CALL EXPAND_DATE( OUTF2, DAYBEHIND(1), DAYBEHIND(2) )
+      !CALL EXPAND_DATE( OUTF1, DAYBEHIND2(1), DAYBEHIND2(2) )
+      !CALL EXPAND_DATE( OUTF3, NYMD, NHMS )
 
       IF( FIRST ) THEN
 
@@ -1880,6 +1887,7 @@
       USE TRACER_MOD,   ONLY : TCVV,N_TRACERS
       USE OCEAN_MERCURY_MOD,  ONLY : Fp, Fg !eds 10/27/11
       USE PBL_MIX_MOD,   ONLY : GET_FRAC_UNDER_PBLTOP
+      USE OBSPACK_MOD,  ONLY : GEOPOT_HYPSO
 
       !USE CMN_SIZE_MOD, ONLY : LLPAR
       !USE CMN_FJ_MOD,   ONLY : IPAR, JPAR, LPAR, JPMAX, JPPJ
@@ -1938,7 +1946,7 @@
       LOGICAL, SAVE       :: FIRST = .TRUE.
       LOGICAL             :: PCHEM
       INTEGER             :: I, IP, IRHN, J, L, JLOOP, M, N,R,RH,V, TOP
-      INTEGER             :: LPLANE
+      INTEGER             :: LPLANE, LIND
       INTEGER             :: VERTIND, TRACERIND
       REAL*8              :: TK, PTAUS, PTAUE, CONSEXP, VPRESH2O, SAODnm
       REAL*8              :: VARI(NPVAR)
@@ -1948,8 +1956,8 @@
       REAL*8, ALLOCATABLE :: PARTVARI(:)
       REAL*8              :: OUT_CONC(NPVAR)
       REAL*8              :: CHEMSTEP_LEN
-      REAL                :: Z2(47)
-      REAL                :: PEDGE(48)
+      REAL*8              :: Z2(LLPAR+1)
+      REAL*8              :: PEDGE(LLPAR+1)
 
       ! ASCENDS KERNEL (D. Baker)
       REAL*8              :: KERN(47) = (/ 0.000035000, 0.000230000,
@@ -2051,11 +2059,11 @@
          ENDDO
 
          !print *,'M:',M
-         !print *,'ptaue:',PTAUE
-         !print *,'ptau_start(m):',P_TAU_START(M)
-         !print *,'ptau(m):',PTAU(M)
-         !print *,'ptau_end(m):',P_TAU_END(M)
-         !print *,'ptaus:',PTAUS
+         print *,'ptaue:',PTAUE
+         print *,'obspack ptau_start(m):',P_TAU_START(M)
+         print *,'ptau(m):',PTAU(M)
+         print *,'obspack ptau_end(m):',P_TAU_END(M)
+         print *,'ptaus:',PTAUS
 
          !==============================================================
          ! We haven't found the first plane point yet...
@@ -2087,7 +2095,7 @@
             !PRINT *,'PTAUE:',PTAUE
             ! PRINT *,'P_TAU_END(M):',P_TAU_END(M)          
          IF (P_TAU_START(M) <= PTAUS .and. P_TAU_END(M) >= PTAUE ) THEN
-            !PRINT *,'BINGO!!!!!!!!!'
+            PRINT *,'BINGO!!!!!!!!!'
             !PRINT *,'WRITING ',M,'th POINT'
             !PRINT *,'P_TAU_START(M):',P_TAU_START(M)
             !PRINT *,'PTAUS:',PTAUS
@@ -2103,7 +2111,7 @@
             ! NOTE: PCHEM and JLOOP are only defined for SMVGEAR runs!
             CALL TEST_VALID( M, PCHEM, JLOOP, CT_Input, I, J, L )
 
-            !PRINT *,'M:',M,'J:',J,'I:',I,'L:',L
+            PRINT *,'M:',M,'J:',J,'I:',I,'L:',L
 
             ! Initialize SMVGEAR reaction counter
             R = 0
@@ -2466,25 +2474,37 @@
                   !&               REAL(Rd,4), 0.61_4,
                   !&               PMID(1:47))
 
-               CALL GEOPOT_HYPSO( State_Met, I, J, 47,
-     &                        Z2,REAL(g0,4),
-     &                       REAL(Rd,4), 0.61_4,
-     &                        PEDGE(1:48))
+!               CALL GEOPOT_HYPSO( State_Met, I, J, 47,
+!     &                        Z2,REAL(g0,4),
+!     &                       REAL(Rd,4), 0.61_4,
+!     &                        PEDGE(1:48))
+
 
                !NEED TO INTERPOLATE 'L' 
 
-              TOP = 1
-              DO VERTIND = 1,LLPAR
-                   IF( Z2(VERTIND)  < P_ALTITUDE(M) ) THEN 
-                      TOP = VERTIND
-                   END IF
-              END DO
+              !TOP = 1
+              !DO VERTIND = 1,LLPAR
+              !     IF( Z2(VERTIND)  < P_ALTITUDE(M) ) THEN 
+              !        TOP = VERTIND
+              !     END IF
+              !END DO
+               !PRINT *,'Z2:',Z2
                !PRINT *,'obs height:',P_ALTITUDE(M)
-               !PRINT *,'setting L to:',TOP
+               !PRINT *,'setting L to:',TOP,' + 1'
 
                !-- I'M ADDING 1 to THIS, NEED TO CHECK AGAINST ANDY'S GEOPOT CODE
                !L = TOP
-               L = TOP + 1
+               !L = TOP + 1
+
+
+              CALL GEOPOT_HYPSO( State_Met, I, J, LLPAR, Z2, PEDGE,RC)
+
+            DO LIND = 1,LLPAR
+              L = LIND
+              IF((Z2(L+1) >= P_ALTITUDE(M)))  EXIT ! NOT FINISHED HERE YET
+            ENDDO
+
+            PRINT *,'L chosen:',L
                
                   !--  Averaging in Met variables
            !PRINT *,'N_TRACERS:',N_TRACERS         
@@ -2514,7 +2534,7 @@
                      P_TEMPERATURE(M) = (MET_TEMPERATURE(I,J,L) + 
      &                 P_TEMPERATURE(M)*P_NSAMPLES(M))/(P_NSAMPLES(M)+1)
 
-                     !PRINT *,'setting indices to:',J,' ',I,' ',L
+                     PRINT *,'setting indices to:',J,' ',I,' ',L
 
                      P_REGION_INDICES(M,1:3) = (/ J,I,L /)
 
@@ -3299,18 +3319,18 @@
          !Z2(N) = Rd*(T(I,J,NLVL-N+1)*(1+Qmf*Q(I,J,NLVL-N+1)))*1/g*
               Z(N) = PHIS(I,J)/g +Rd*(T(I,J,NLVL-N+1))*1/g*
      &              LOG(pedge2(N+1)/pedge2(N))
-       PRINT *,'I:',I,'J:',J
-       PRINT *,'Z(N):',Z(N)
-       PRINT *,'T(I,J,NLVL-N+1):',T(I,J,NLVL-N+1)
-       PRINT *,'PHIS(I,J):',PHIS(I,J)
-       PRINT *,'LOG(pedge2(N+1)/pedge2(N)):',LOG(pedge2(N+1)/pedge2(N))
+       !PRINT *,'I:',I,'J:',J
+       !PRINT *,'Z(N):',Z(N)
+       !PRINT *,'T(I,J,NLVL-N+1):',T(I,J,NLVL-N+1)
+       !PRINT *,'PHIS(I,J):',PHIS(I,J)
+       !PRINT *,'LOG(pedge2(N+1)/pedge2(N)):',LOG(pedge2(N+1)/pedge2(N))
       ENDDO
  
       Z2 = 0
 
       DO N=1, NLVL
         Z2(N) = SUM(Z(NLVL-N+1:NLVL)) 
-        PRINT *,'N:',N,'PARTIAL SUM Z2(N):',Z2(N)
+        !PRINT *,'N:',N,'PARTIAL SUM Z2(N):',Z2(N)
       ENDDO
       !PRINT *,'Z2:',Z2
 

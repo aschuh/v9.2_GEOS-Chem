@@ -101,6 +101,7 @@
       PRIVATE :: READ_BBIO_SIB_HARMONIC
       PRIVATE :: READ_KAWA_GENERIC_3HR_FLUX
       PRIVATE :: READ_ODA_FOSSILCO2
+      PRIVATE :: READ_ODA_FOSSILCO2_1x1_HOURLY
       PRIVATE :: TOTAL_BIOMASS_TG
       PRIVATE :: DEF_BIOSPH_CO2_REGIONS_F
       PRIVATE :: DEF_OCEAN_CO2_REGIONS_F
@@ -466,6 +467,21 @@
          
       ENDIF
 
+       ! Doney oceanic exchange - NetCDF not BPCH
+       ! CAUTION, Using 3hr oi CT ocean fluxes but Doney subroutine in the wrapper
+       IF ( LDOCNMON ) THEN
+          IF ( MOD( HOUR, 3 ) == 0 ) THEN  
+          CALL READ_DONEY_OCEANCO2(MONTH,DAY,HOUR,
+     &        am_I_Root, Input_Opt, RC)
+          ENDIF
+       ENDIF
+
+       !  ODIAC FOSSIL
+       IF ( LODAFF) THEN
+          CALL READ_ODA_FOSSILCO2_1x1_HOURLY( am_I_Root, Input_Opt,RC)
+       ENDIF
+
+      print *,'done w/ read_oda'
       !----------------------------------------------------------------
       ! Fluxes with "possible" monthly variability are called below
       ! In some cases the annual file is just called at the start 
@@ -473,7 +489,7 @@
       !----------------------------------------------------------------
       IF ( ITS_A_NEW_MONTH() ) THEN 
 	
-
+        PRINT *,'enter new month loop'
          !IF ( LSIBBIOHOURLY ) THEN
          !write(*,*)  '*** USING SIB MONTHLY NEE ***'
          ! ... otherwise use constant daily emissions of NEP for Bal Bio
@@ -487,7 +503,7 @@
  
          !  ODIAC FOSSIL
          IF ( LODAFF ) THEN
-            CALL READ_ODA_FOSSILCO2( am_I_Root, Input_Opt, RC )
+          !  CALL READ_ODA_FOSSILCO2( am_I_Root, Input_Opt, RC )
          ENDIF          
                      
          ! Oceanic exchange
@@ -496,9 +512,10 @@
          ENDIF
 
          ! Doney oceanic exchange - NetCDF not BPCH
-         IF ( LDOCNMON ) THEN
-            CALL READ_DONEY_OCEANCO2(MONTH, am_I_Root, Input_Opt, RC)
-         ENDIF
+         !IF ( LDOCNMON ) THEN
+         !   CALL READ_DONEY_OCEANCO2(MONTH,DAY,HOUR, 
+        !&        am_I_Root, Input_Opt, RC)
+         !ENDIF
 
          ! Ship emissions from EDGAR
          IF ( LSHIPEDG ) CALL READ_SHIPCO2_EDGAR
@@ -515,6 +532,7 @@
             CALL CHEM_SURF( am_I_Root, Input_Opt, RC )
             CHEMSRC = CHEMCO2
          ENDIF
+      PRINT *,'exiting new month loop'
       ENDIF
 	
       !=================================================================
@@ -1162,6 +1180,171 @@
       END SUBROUTINE READ_FOSSILCO2
 !EOC
 !------------------------------------------------------------------------------
+!BOP
+!
+! !IROUTINE: read_fossilco2
+!
+! !DESCRIPTION: Subroutine READ\_FOSSILCO2 reads in fossil fuel CO2
+!  emissions from a bpch file.
+!\\
+!\\
+! !INTERFACE:
+!
+      SUBROUTINE READ_ODA_FOSSILCO2_1x1_HOURLY(am_I_Root,Input_Opt,RC )
+!
+! !USES:
+!
+      USE CMN_SIZE_MOD
+      USE NCCOOARDSFORMAT,  ONLY : readVar2D, readensVar2D
+      USE BPCH2_MOD,          ONLY : GET_NAME_EXT_2D, GET_RES_EXT
+      USE BPCH2_MOD,          ONLY : GET_TAU0,        READ_BPCH2
+      USE DIRECTORY_MOD,      ONLY : FOSSIL_DIR
+      USE DIRECTORY_MOD,      ONLY : DATA_DIR_1x1
+      USE GIGC_ErrCode_Mod
+      USE GIGC_Input_Opt_Mod, ONLY : OptInput
+      USE TRANSFER_MOD,       ONLY : TRANSFER_2D
+      USE TIME_MOD,           ONLY : GET_YEAR, GET_MONTH, GET_DAY
+      USE TIME_MOD,           ONLY : GET_HOUR
+      USE ENKF_MOD,           ONLY : LBIAS, BIASFILE, ENUMBER
+
+      USE REGRID_1x1_MOD,   ONLY : DO_REGRID_G2G_1x1, DO_REGRID_1x1
+      USE REGRID_A2A_MOD,     ONLY : DO_REGRID_A2A
+
+      USE m_netcdf_io_close
+      USE m_netcdf_io_open
+      USE m_netcdf_io_read
+
+!
+! !INPUT PARAMETERS:
+!
+      LOGICAL,        INTENT(IN)    :: am_I_Root   ! Are we on the root CPU?
+      TYPE(OptInput), INTENT(IN)    :: Input_Opt   ! Input Options object
+!
+! !OUTPUT PARAMETERS:
+!
+      INTEGER,        INTENT(OUT)   :: RC          ! Success or failure?
+!
+! !REMARKS:
+!  Original data provided by Robert Andres (CDIAC), personal communication
+!                                                                             .
+!  If GENFF=T, then annual data for 1995 are read (but tau is for 1985)
+!  If ANNFF=T, then annual data for a given year (1985-2006) are read
+!  If MONFF=T, then annual data for a given month (198501-200612) are read
+!                                                                             .
+!  ANNFF and MONFF for 2007-2009 were developed based on scaling using
+!  preliminary data on the CDIAC website for 2007-2008 and LeQuere et al.
+!  (2009) for 2009
+!                                                                             .
+!      -- Ray Nassar 2010-03-10
+!
+! !REVISION HISTORY:
+!  16 Aug 2005 - P. Suntharalingam   - Initial version
+!  18 May 2010 - R. Nassar, D. Jones - Updated
+!  25 Feb 2011 - R. Nassar           - Now point to annual_v2010 and
+!                                      monthly_v2010 directories, which
+!                                      contain updated CO2 data from CDIAC
+!  25 Mar 2013 - R. Yantosca - Now accept am_I_Root, Input_Opt, RC
+!EOP
+!------------------------------------------------------------------------------
+!BOC
+!
+! !LOCAL VARIABLES:
+!
+      INTEGER                :: I, J, YEAR, MONTH, DAY, HOUR
+      INTEGER                :: ncid
+      REAL*4                 :: FF_ARRAY(IIPAR,JJPAR,1)
+      CHARACTER(LEN=255)     :: FF_FILENAME
+      CHARACTER(LEN=4)       :: CYEAR
+      CHARACTER(LEN=2)       :: CMONTH
+      CHARACTER(LEN=2)       :: CDAY
+      CHARACTER(LEN=255)     :: LLFILENAME
+      REAL*8                 :: FLX_ARRAY(360,180,1)
+      REAL*8, TARGET      :: GEN_1x1(360,180,1)
+
+      logical                       :: flux_updated
+
+      REAL*8, TARGET     :: GEOS_1x1(I1x1,J1x1,1)    !(lmw,05/16/11)
+      REAL*8, TARGET     :: GEOS_GRID(IIPAR,JJPAR,1)
+
+      REAL*8, POINTER    :: INGRID(:,:)  => NULL()
+      REAL*8, POINTER    :: OUTGRID(:,:) => NULL()
+
+      !=================================================================
+      ! READ_FOSSILCO2 begins here!
+      !=================================================================
+
+      ! Assume success
+      RC        =  GIGC_SUCCESS
+
+      ! Time variables
+      YEAR   = GET_YEAR()
+      MONTH  = GET_MONTH()
+      DAY    = GET_DAY()
+      HOUR   = GET_HOUR()
+
+      WRITE( CYEAR,  '(i4)'   ) YEAR
+      WRITE( CMONTH, '(i2.2)' ) MONTH
+      WRITE( CDAY, '(i2.2)' ) DAY
+
+      !=================================================================
+      ! Filename for fossil fuel CO2 data
+      !=================================================================
+
+!     Need a fairly generic file name
+      FF_FILENAME = TRIM( FOSSIL_DIR ) // 'fossil_fuel_1x1_' //
+     &              CYEAR // CMONTH // CDAY // '.nc'
+
+!     Old stuff
+!     FF_FILENAME ='/scratch3/bmckeown/data/fossil/'      //
+!    &              '2.5x2/20pct/oddy20pctf_v3.1_2.5x2d_' //
+!    &              CYEAR // '.nc'
+
+      ! Echo file name to stdout
+      WRITE( 6, 100 ) TRIM( FF_FILENAME )
+ 100  FORMAT( '     - READ_ODA_FOSSILCO2_1x1_HOURLY: Reading ', a )
+
+      !---------------------------
+      !-- Reading fossil fuels
+      !---------------------------
+
+      CALL Ncop_Rd (ncid, TRIM(FF_FILENAME) )
+
+      CALL Ncrd (FLX_ARRAY(:,:,1), ncid, 'emission' ,
+     &     (/ 1, 1, HOUR+ 1 /), 
+     &     (/ 360, 180, 1 /))
+
+      CALL NcCl (ncid)
+
+      GEN_1x1(:,:,1) = FLX_ARRAY(:,:,1)
+
+      ! Regrid from GENERIC 1x1 --> current model resolution
+      INGRID  => GEN_1x1  (:,:,1)
+      OUTGRID => GEOS_GRID(:,:,1)
+
+      ! File with lat/lon edges for regridding
+      LLFILENAME = TRIM( DATA_DIR_1x1) //
+     &             'MAP_A2A_Regrid_201203/MAP_A2A_latlon_geos1x1.nc'
+
+      CALL DO_REGRID_A2A( LLFILENAME, I1x1,    J1x1-1,
+     &                    INGRID,     OUTGRID, IS_MASS=0,
+     &                    netCDF=.TRUE.                   )
+
+      print *,'max flux:',MAXVAL(GEOS_GRID(:,:,1) 
+     &     * 0.08333333 * 0.0001388889)
+
+      print *,'min flux:',MINVAL(GEOS_GRID(:,:,1) 
+     &    * 0.08333333* 0.0001388889)
+
+      !EMFOSSCO2 = GEOS_GRID(:,:,1) * 6.022142e+19_8
+      !  Add in CT(molC sec^-1 m^-2) -> Nassar ODIAC (gC day^-1 m^-2)
+      EMFOSSCO2 = GEOS_GRID(:,:,1) * 5.808393e+13_8
+     
+      ! Free pointers
+      NULLIFY( INGRID, OUTGRID )
+
+      END SUBROUTINE READ_ODA_FOSSILCO2_1x1_HOURLY
+!EOC
+!------------------------------------------------------------------------------
 !                        University of Toronto and                            !
 !          Harvard University Atmospheric Chemistry Modeling Group            !
 !------------------------------------------------------------------------------
@@ -1241,7 +1424,6 @@
       ! Time variables
       YEAR   = GET_YEAR()
       MONTH  = GET_MONTH()
-
 
       WRITE( CYEAR,  '(i4)'   ) YEAR
       WRITE( CMONTH, '(i2.2)' ) MONTH
@@ -1997,7 +2179,8 @@
 !\\
 ! !INTERFACE:
 !
-      SUBROUTINE READ_DONEY_OCEANCO2( MONTH,am_I_Root, Input_Opt, RC )
+      SUBROUTINE READ_DONEY_OCEANCO2( MONTH,DAY,HOUR, am_I_Root, 
+     &        Input_Opt, RC )
 !
 ! !USES:
 !
@@ -2025,6 +2208,8 @@
 ! !INPUT PARAMETERS:
 !
       INTEGER, INTENT(IN) :: MONTH   ! Current month (1-12)
+      INTEGER, INTENT(IN) :: DAY     ! Current day (1-31)
+      INTEGER, INTENT(IN) :: HOUR    ! Current hour (0-23)
       LOGICAL,        INTENT(IN)  :: am_I_Root   ! Are we on the root CPU?
       TYPE(OptInput), INTENT(IN)  :: Input_Opt   ! Input Options object
 !
@@ -2059,7 +2244,7 @@
       CHARACTER(LEN=255)     :: OCEAN_FILENAME
       CHARACTER(LEN=255)     :: OCEAN_BIAS_FILENAME
       CHARACTER(LEN=4)       :: CYEAR
-      CHARACTER(LEN=2)       :: CMONTH
+      CHARACTER(LEN=2)       :: CMONTH, CDAY
       CHARACTER(LEN=255)     :: TRANSCOM_FILENAME
       CHARACTER(LEN=255)     :: LLFILENAME
 
@@ -2086,11 +2271,14 @@
       ! Create string for day of year
        WRITE( CYEAR, '(i4)' ) YEAR
        WRITE( CMONTH, '(i2.2)' ) MONTH
+       WRITE( CDAY, '(i2.2)' ) DAY
 
 
+!      OCEAN_FILENAME = TRIM( OCEAN_DIR ) //
+!     &                  CYEAR // '.nc'
 
       OCEAN_FILENAME = TRIM( OCEAN_DIR ) //
-     &                  CYEAR // '.nc'
+     &                  CYEAR // CMONTH // CDAY // '.nc'
 
       ! Echo file name to stdout
       WRITE( 6, 100 ) TRIM( OCEAN_FILENAME )
@@ -2099,8 +2287,24 @@
       !-----------------------------------------------------------------
       ! Read ocean flux [molec CO/cm2/s] from disk
       !-----------------------------------------------------------------
-      CALL readVar2D(TRIM(OCEAN_FILENAME),'FG_CO2',IIPAR,
-     &                  JJPAR, MONTH, FLX_ARRAY(:,:,1))
+!      CALL readVar2D(TRIM(OCEAN_FILENAME),'FG_CO2',IIPAR,
+!     &                  JJPAR, MONTH, FLX_ARRAY(:,:,1))
+
+      CALL Ncop_Rd (ncid, TRIM(OCEAN_FILENAME) )
+
+      CALL Ncrd (FLX_ARRAY(:,:,1), ncid, 'ocn_flux_opt' ,
+     &     (/ 1, 1, HOUR/3+ 1 /),
+     &     (/ 360, 180, 1 /))
+
+      CALL NcCl (ncid)
+
+      !IF ( ( MONTH .EQ. 2 ) .AND. ( DAY .EQ. 29 ) ) THEN
+      ! CALL readVar2D(TRIM(OCEAN_FILENAME),'ocn_flux_opt',
+      !&      360,180, (DAY-2)*8+HOUR/3+1,FLX_ARRAY(:,:,1))
+      !ELSE
+      ! CALL readVar2D(TRIM(OCEAN_FILENAME),'ocn_flux_opt',
+      !&      360,180, (DAY-1)*8+HOUR/3+1,FLX_ARRAY(:,:,1))
+      !ENDIF
 
       WHERE (FLX_ARRAY > 10.0) FLX_ARRAY = 0.0
 
@@ -3700,7 +3904,7 @@
       !print *,'bio fluxes:',GEOS_GRID
 
       !--  Writing out bio fluxes
-      IF(ENUMBER .eq. 1) THEN
+      IF(( ENUMBER .eq. 1 ) .and. ( RERUN .eq. 1 ) ) THEN
 
          BIOF = TRIM(BIOFILENAME)
          NYMD  = GET_NYMD()
@@ -4084,12 +4288,12 @@
       CALL Ncrd(PFT_REF(:,:,:), ncid,'pft_ref',
      &       (/ 1,1,1 /), (/ 360,180,10 /))
 
-      PRINT *,'PFT AMZ:',PFT_REF(100:110,85:95,1)
+      !PRINT *,'PFT AMZ:',PFT_REF(100:110,85:95,1)
 
       CALL Ncrd(PFT_AREA(:,:,:), ncid,'pft_area',
      &       (/ 1,1,1 /), (/ 360,180,10 /))
 
-      PRINT *,'AREA AMZ:',PFT_AREA(100:110,85:95,1)
+      !PRINT *,'AREA AMZ:',PFT_AREA(100:110,85:95,1)
 
       CALL Ncrd(RARRAY(:,:,:,1), ncid,'resp_balanced',
      &       (/ 1,1,1,MONTH /), (/ 360,180,10,1 /))
@@ -4097,7 +4301,7 @@
       CALL Ncrd(AARRAY(:,:,:,1), ncid,'assim',
      &       (/ 1,1,1,MONTH /), (/ 360,180,10,1 /))
 
-      PRINT *,'ASSIM AMZ:',AARRAY(100:110,85:95,1,1)
+      !PRINT *,'ASSIM AMZ:',AARRAY(100:110,85:95,1,1)
 
       CALL Nccl( NCID )
 
@@ -4129,7 +4333,7 @@
       !PRINT *,'R test flux:',RARRAY(:,128,2,1)
       !PRINT *,'A test flux:',AARRAY(:,128,2,1)
 
-      PRINT *,'HARMONIC:',HARMONIC
+      !PRINT *,'HARMONIC:',HARMONIC
 
       SELECT CASE (ITS_A_LEAPYEAR (GET_YEAR()))
        CASE (.TRUE.)
@@ -4143,14 +4347,14 @@
         IF (REAL(HARMONIC) > 0.1 .and. REAL(HARMONIC) < 3.9) THEN
              RARRAY(:,:,:,:) = RARRAY(:,:,:,:) * 
      &              SIN(2*PI*REAL(HARMONIC) * DAY_DIVISOR)
-        PRINT*,'APPLYING HARMONIC:',SIN(2*PI*REAL(HARMONIC)*DAY_DIVISOR)
+        !PRINT*,'APPLYING HARMONIC:',SIN(2*PI*REAL(HARMONIC)*DAY_DIVISOR)
         ENDIF
 
         IF (REAL(HARMONIC) > 3.9 .and. REAL(HARMONIC) < 8) THEN
              RARRAY(:,:,:,:) = RARRAY(:,:,:,:) *
      &              COS(2*PI*REAL(HARMONIC-3) * DAY_DIVISOR)
-        PRINT*,'APPLYING HARMONIC:',
-     &        COS(2*PI*REAL(HARMONIC-3)*DAY_DIVISOR)
+        !PRINT*,'APPLYING HARMONIC:',
+        !&        COS(2*PI*REAL(HARMONIC-3)*DAY_DIVISOR)
         ENDIF
 
       ENDIF
@@ -4160,14 +4364,14 @@
         IF (REAL(HARMONIC) > 0.1 .and. REAL(HARMONIC) < 3.9) THEN
              AARRAY(:,:,:,:) = AARRAY(:,:,:,:) *
      &              SIN(2*PI*REAL(HARMONIC) * DAY_DIVISOR)
-        PRINT*,'APPLYING HARMONIC:',SIN(2*PI*REAL(HARMONIC)*DAY_DIVISOR)
+        !PRINT*,'APPLYING HARMONIC:',SIN(2*PI*REAL(HARMONIC)*DAY_DIVISOR)
         ENDIF
 
         IF (REAL(HARMONIC) > 3.9 .and. REAL(HARMONIC) < 8) THEN
              AARRAY(:,:,:,:) = AARRAY(:,:,:,:) *
      &              COS(2*PI*REAL(HARMONIC-3) * DAY_DIVISOR)
-        PRINT*,'APPLYING HARMONIC:',
-     &       COS(2*PI*REAL(HARMONIC-3)*DAY_DIVISOR)
+        !PRINT*,'APPLYING HARMONIC:',
+        !&       COS(2*PI*REAL(HARMONIC-3)*DAY_DIVISOR)
         ENDIF
 
       ENDIF
@@ -4178,10 +4382,10 @@
         ENDDO
       ENDDO
 
-      PRINT *,'FLUX AMZ:', NEEARRAY(100:110,85:95)
+      !PRINT *,'FLUX AMZ:', NEEARRAY(100:110,85:95)
 
-      PRINT *,'test flux:',NEEARRAY(:,128)
-      PRINT *,'test flux2:',NEEARRAY(:,100)
+      !PRINT *,'test flux:',NEEARRAY(:,128)
+      !PRINT *,'test flux2:',NEEARRAY(:,100)
 
       !-- Convert umolC m^-2 s^-1 to molecules C cm^-2 s^-1
       !-- Then convert molC to molecules C via Avos #
@@ -4204,69 +4408,8 @@
       !-- At this point NEEARRAY is POSITIVE and either Resp or GPP
    
 
-      PRINT *,'REGRID FLUX:',OUTGRID(32,:)
-      PRINT *,'REGRID FLUX2:',OUTGRID(25,:)
-
-      !IF ( LBIAS ) THEN
-      !
-      ! IF ( LENKF ) THEN
-      !   IF ( .NOT. RERUN ) THEN
-      !        CYCLE_NUM = CYCLE_NUM - 1
-      !        write(CCYCLE_NUM, '(i3.3)') CYCLE_NUM
-      !        CYCLE_NUM = CYCLE_NUM + 1
-      !   ELSE
-      !        write(CCYCLE_NUM, '(i3.3)') CYCLE_NUM
-      !   ENDIF
-      !
-      !  IF ( LLAG ) THEN
-      !    XREAL = GET_ELAPSED_MIN()/(1440*CYCLE_LEN)
-      !    print *,'MINS:',GET_ELAPSED_MIN()
-      !    XDAY =  XREAL
-      !    print *,'XDAY:',XDAY
-      !    LAG_NUM_NEW = LAG_NUM + XDAY
-
-      !    write(CLAG_NUM, '(i3.3)') LAG_NUM_NEW
-
-      !    IF ( RERUN ) THEN
-      !    !CURRENT_BIASFILE = TRIM(BIASFILEIN)//'post_'//CLAG_NUM//'_'//
-      !    !&         CCYCLE_NUM //'.nc'
-      !    ELSE
-      !    !CURRENT_BIASFILE = TRIM(BIASFILEIN)//'prior_'//CLAG_NUM//'_'//
-      !    !&         CCYCLE_NUM//'.nc'
-      !    ENDIF
-
-      !   ELSE
-      !    IF ( RERUN ) THEN
-      !    CURRENT_BIASFILE = TRIM(BIASFILEIN)//'post_'//
-      !&         CCYCLE_NUM //'.nc'
-      !    ELSE
-      !    CURRENT_BIASFILE = TRIM(BIASFILEIN)//'prior_'//
-      !&         CCYCLE_NUM//'.nc'
-      !    ENDIF
-      !
-      !   ENDIF
-    
-
-      !   PRINT *,'USING BIASFILE:',CURRENT_BIASFILE
-      !   !CALL STRREPL( FILE, 'ENSNUMB', TRIM(CENUMBER) )
-      ! ENDIF
-
-      !    print *,'reading biases from ...',trim(BIASFILE)
-
-      !    CALL readensVar2D(TRIM(CURRENT_BIASFILE),'BETAGPP',IIPAR,
-      !&                   JJPAR, ENUMBER, 1, GPPBIAS(:,:,1))
-
-      !    CALL readensVar2D(TRIM(CURRENT_BIASFILE),'BETARESP',IIPAR,
-      !&                   JJPAR, ENUMBER, 1, RESPBIAS(:,:,1))
-
-           !*****RARRAY = RARRAY + ( RESPBIAS * RARRAY )
-           !*****AARRAY = AARRAY + ( GPPBIAS * AARRAY )
-      ! ENDIF
-
-      !-- Calc NEE to feed in as emissions
-      !NEEARRAY = RARRAY - AARRAY
-
-      !print *,'ADJ:',sum(RESPBIAS*RARRAY)/(max(1,size(RESPBIAS)))
+      !PRINT *,'REGRID FLUX:',OUTGRID(32,:)
+      !PRINT *,'REGRID FLUX2:',OUTGRID(25,:)
 
       ! Cast from REAL*4 to REAL*8 and resize if necessary
       EMBIOCO2 = OUTGRID(:,:)

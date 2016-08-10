@@ -79,7 +79,7 @@
       USE PLANEFLIGHT_MOD       ! For ND40  (plane flight track  ) diag
 
       !-- Added gosat and ascends satellite diags
-      USE GOSAT_MOD,     ONLY : GOSAT,SETUP_GOSAT
+      USE CO2SAT_MOD, ONLY : CO2SAT, SETUP_CO2SAT, CO2SAT_OUTPUT_CLOSE
       USE NCCOOARDSFORMAT, ONLY: ncGOSATOutputClose
       USE ASCENDS_MOD,   ONLY : ASCENDS,SETUP_ASCENDS
       USE CT_MOD,        ONLY : CT,SETUP_CT,CT_FINISH_OUTPUT
@@ -845,7 +845,8 @@
      &           CALL DEBUG_MSG( '### MAIN: a READ_HG2_PARTITIONGING')
          ENDIF
 
-         IF ( Input_Opt%DO_OBSPACK .and. ( ITS_A_NEW_DAY() )) THEN
+         IF ( Input_Opt%DO_OBSPACK .and. 
+     &            ( ITS_A_NEW_DAY() )) THEN
                PRINT *,'ooobbbbbbsssspack'
                CALL OBSPACK_INIT( am_I_Root, Input_Opt, RC)
          ENDIF
@@ -1302,25 +1303,25 @@
          ! Need to save timestamps for filenames.
          ! (ccc, 5/13/09)
  
-         ! GOSAT following diagnostic
+         ! CO2SAT following diagnostic
          IF ( ND80 > 0 ) THEN
 
-            ! Call SETUP_GOSAT routine if necessary
+            ! Call SETUP_CO2SAT routine if necessary
             IF ( ITS_A_NEW_DAY() ) THEN
 
                ! If it's a full-chemistry simulation but LCHEM=F,
                ! or if it's an offline simulation, call setup routine
                IF ( ITS_A_FULLCHEM_SIM ) THEN
-                  IF ( .not. LCHEM ) CALL SETUP_GOSAT( am_I_Root , 
+                  IF ( .not. LCHEM ) CALL SETUP_CO2SAT( am_I_Root , 
      &                Input_Opt,RC)
                ELSE
-                  PRINT *,'calling SETUP_GOSAT'
-                  CALL SETUP_GOSAT( am_I_Root , Input_Opt,RC)
+                  PRINT *,'calling SETUP_CO2SAT'
+                  CALL SETUP_CO2SAT( am_I_Root , Input_Opt,RC)
                ENDIF
             ENDIF
          ENDIF
 
-         ! GOSAT following diagnostic
+         ! CO2SAT following diagnostic
          IF ( ND82 > 0 ) THEN
 
             ! Call SETUP_CT routine if necessary
@@ -1420,8 +1421,8 @@
             IF ( ND80 > 0 ) THEN
 
                ! Archive data along the flight track
-               PRINT *,'CALLING GOSAT'
-               CALL GOSAT
+               PRINT *,'CALLING CO2SAT'
+               CALL CO2SAT
      &            ( am_I_Root, Input_Opt, State_Met, State_Chm, RC )
             ENDIF
 
@@ -1622,6 +1623,12 @@
      &              CT_Output_1, CT_Output_2)
 
       IF ( DO_SAVE_DIAG48 ) CALL ncStationFileClose
+
+      !-- Cleanup Andy's obspack code
+         IF ( Input_Opt%DO_OBSPACK) THEN
+               PRINT *,'ooobbbbbbsssspack finish'
+               CALL OBSPACK_INIT( am_I_Root, Input_Opt, RC)
+         ENDIF
 
       ! Deallocate dynamic module arrays
       CALL CLEANUP( am_I_Root, RC )

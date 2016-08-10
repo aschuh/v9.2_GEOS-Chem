@@ -977,6 +977,7 @@
       USE GRID_MOD,           ONLY : GET_YMID
 
       USE DIAG_MOD,           ONLY : AD12
+      USE PRESSURE_MOD,       ONLY : GET_PEDGE
 
 #if   defined( USE_NCDF4 )
       USE NETCDF
@@ -1043,7 +1044,7 @@
 
       !-- Added for ncdf4 output
       INTEGER            :: fNCID,variableID,locallatid,locallonid
-      INTEGER            :: localtimeid,locallevid
+      INTEGER            :: localtimeid,locallevid,pressID,apID,bpID
       REAL               :: HOUROUT
 
       CHARACTER(LEN=16)  :: STAMP
@@ -1054,6 +1055,9 @@
       CHARACTER(LEN=20),ALLOCATABLE  :: TRACERNAMES(:)
       CHARACTER(LEN=20)  :: ICHARACTER
       REAL, ALLOCATABLE  :: LATS_NC(:), LONS_NC(:), LEVS_NC(:)
+
+      REAL               :: PRESS_OUT(IIPAR,JJPAR)
+
       REAL, DIMENSION(47) :: lev_meters = (/58,189,320,454,589,726,864,
      &                        1004,1146,1290,1436,1584,1759,1988,2249,
      &                        2517,2792,3074,3439,3896,4375,4879,5413,
@@ -1064,9 +1068,40 @@
 
       REAL, PARAMETER :: CO2_TO_PPM = 1000000.0
 
+      REAL, DIMENSION(48) :: AP,BP
+
       ! For fields from Input_Opt
       LOGICAL            :: LND50_HDF
       INTEGER            :: N_TRACERS
+
+      ! Ap [hPa] for 47 levels (48 edges)
+      AP = (/ 0.000000d+00, 4.804826d-02, 6.593752d+00, 1.313480d+01,
+     &        1.961311d+01, 2.609201d+01, 3.257081d+01, 3.898201d+01,
+     &        4.533901d+01, 5.169611d+01, 5.805321d+01, 6.436264d+01,
+     &        7.062198d+01, 7.883422d+01, 8.909992d+01, 9.936521d+01,
+     &        1.091817d+02, 1.189586d+02, 1.286959d+02, 1.429100d+02,
+     &        1.562600d+02, 1.696090d+02, 1.816190d+02, 1.930970d+02,
+     &        2.032590d+02, 2.121500d+02, 2.187760d+02, 2.238980d+02,
+     &        2.243630d+02, 2.168650d+02, 2.011920d+02, 1.769300d+02,
+     &        1.503930d+02, 1.278370d+02, 1.086630d+02, 9.236572d+01,
+     &        7.851231d+01, 5.638791d+01, 4.017541d+01, 2.836781d+01,
+     &        1.979160d+01, 9.292942d+00, 4.076571d+00, 1.650790d+00,
+     &        6.167791d-01, 2.113490d-01, 6.600001d-02, 1.000000d-02 /)
+
+      ! Bp [unitless] for 47 levels (48 edges)
+      BP = (/ 1.000000d+00, 9.849520d-01, 9.634060d-01, 9.418650d-01,
+     &        9.203870d-01, 8.989080d-01, 8.774290d-01, 8.560180d-01,
+     &        8.346609d-01, 8.133039d-01, 7.919469d-01, 7.706375d-01,
+     &        7.493782d-01, 7.211660d-01, 6.858999d-01, 6.506349d-01,
+     &        6.158184d-01, 5.810415d-01, 5.463042d-01, 4.945902d-01,
+     &        4.437402d-01, 3.928911d-01, 3.433811d-01, 2.944031d-01,
+     &        2.467411d-01, 2.003501d-01, 1.562241d-01, 1.136021d-01,
+     &        6.372006d-02, 2.801004d-02, 6.960025d-03, 8.175413d-09,
+     &        0.000000d+00, 0.000000d+00, 0.000000d+00, 0.000000d+00,
+     &        0.000000d+00, 0.000000d+00, 0.000000d+00, 0.000000d+00,
+     &        0.000000d+00, 0.000000d+00, 0.000000d+00, 0.000000d+00,
+     &        0.000000d+00, 0.000000d+00, 0.000000d+00, 0.000000d+00 /)
+
 
       !=================================================================
       ! WRITE_DIAG50 begins here!
@@ -1162,6 +1197,39 @@
 
             CALL handleerror(nf90_inq_varid(fNCID,'Levels',locallevID))
             CALL handleerror(nf90_put_var(fNCID,locallevID,LEVS_NC))
+
+            !-- adding pressure data
+
+
+            ! Loop over grid boxes
+            DO Y = 1, JJPAR
+            DO X = 1, IIPAR
+
+            PRESS_OUT(X,Y) = GET_PEDGE( X, Y, 1)
+
+            ENDDO
+            ENDDO
+            print *,'done w/ press_out, getting ready to put'
+
+
+
+            CALL handleerror(nf90_inq_varid(fNCID, 'surfacepressure', 
+     &        pressID))
+
+            CALL handleerror(nf90_put_var(ncid=fNCID, varid=pressID,
+     &        values=PRESS_OUT(1:IIPAR, 1:JJPAR)))
+
+            CALL handleerror(nf90_inq_varid(fNCID, 'ap',
+     &        apID))
+
+            CALL handleerror(nf90_inq_varid(fNCID, 'bp',
+     &        bpID))
+
+            CALL handleerror(nf90_put_var(ncid=fNCID, varid=apID,
+     &        values=AP))
+
+            CALL handleerror(nf90_put_var(ncid=fNCID, varid=bpID,
+     &        values=BP))
 
             CALL handleError(nf90_close(fNCID))
 

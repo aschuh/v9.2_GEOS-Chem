@@ -15,7 +15,7 @@ module ncCooardsFormat
     ! Handles for the file, dimensions, and variables
     integer, save :: fileNCID
     integer, save :: latDimID, lonDimID, levDimID, timeDimID
-    integer, save :: latID, lonID, levID, timeID, varID
+    integer, save :: latID, lonID, levID, timeID, varID, pressID,apID,bpID,edgeDimID
 
     ! Handles for the file, dimensions, and variables
     integer, save :: stationFileNCID, gosatOutputNCID, ctOutputNCID
@@ -441,6 +441,7 @@ subroutine ncGOSATOutputCreate(filename, nSoundings,xco2_cloudheight,xco2_latitu
             call handleError(nf90_def_dim(fileNCID, "lon", nLon, lonDimID))
             call handleError(nf90_def_dim(fileNCID, "lat", nLat, latDimID))
             call handleError(nf90_def_dim(fileNCID, "Levels", nLevels, levDimID))
+            call handleError(nf90_def_dim(fileNCID, "Edges", nLevels+1, edgeDimID))
             !call handleError(nf90_def_dim(fileNCID, "time", nTime, timeDimID))
             call handleError(nf90_def_dim(fileNCID, "time", nf90_unlimited, timeDimId))
             dimids = (/ lonDimID, latDimID, levDimID, timeDimID /)
@@ -450,6 +451,9 @@ subroutine ncGOSATOutputCreate(filename, nSoundings,xco2_cloudheight,xco2_latitu
             call handleError(nf90_def_var(fileNCID, "lon", nf90_double, lonDimID, lonID))
             call handleError(nf90_def_var(fileNCID, "lat", nf90_double, latDimID, latID))
             call handleError(nf90_def_var(fileNCID, "time", nf90_double, timeDimID, timeID))
+            call handleError(nf90_def_var(fileNCID, "surfacepressure",nf90_double, (/ lonDimID, latDimID /), pressID))
+            call handleError(nf90_def_var(fileNCID, "ap",nf90_double, edgeDimID, apID))
+            call handleError(nf90_def_var(fileNCID, "bp",nf90_double, edgeDimID, bpID))
             !print *,'defined dims'
          DO i = 1,nVars
             !print *,'nVars:',i,'varID:',varID
@@ -481,7 +485,7 @@ subroutine ncGOSATOutputCreate(filename, nSoundings,xco2_cloudheight,xco2_latitu
         
         subroutine addGlobalAttributes()
             call handleError(nf90_put_att(fileNCID, NF90_GLOBAL, "Conventions", "COOARDS"))
-
+            call handleError(nf90_put_att(fileNCID, NF90_GLOBAL, "3D press reconstruction", "Bottom pressure edge (I,J,L) = Ap(L) + [ Bp(L) * Psurface(I,J) ]"))
         end subroutine addGlobalAttributes
 
         subroutine writeVar2D(var, nLon, nLat, nTime)
